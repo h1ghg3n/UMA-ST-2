@@ -1,0 +1,88 @@
+[project]
+name = "umacircle-bot"
+version = "0.1.0"
+description = "Discord bot and data platform for Umamusume circle events"
+requires-python = ">=3.11"
+dependencies = [
+    "alembic>=1.13,<2",
+    "cryptography>=42,<46",
+    "discord.py>=2.6,<3",
+    "openpyxl>=3.1,<4",
+    "pydantic>=2.8,<3",
+    "pydantic-settings>=2.4,<3",
+    "pymysql>=1.1,<2",
+    "python-dotenv>=1.0,<2",
+    "sqlalchemy>=2.0,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<9",
+    "pytest-cov>=5,<7",
+    "ruff>=0.5,<1",
+]
+
+[project.scripts]
+umacircle-bot = "umacircle_bot.bot:main"
+umacircle-import-legacy-points = "umacircle_bot.scripts.import_legacy_points:main"
+umacircle-import-legacy-races = "umacircle_bot.scripts.import_legacy_races:main"
+umacircle-import-legacy-ledger = "umacircle_bot.scripts.import_legacy_ledger:main"
+umacircle-import-legacy-results = "umacircle_bot.scripts.import_legacy_results:main"
+umacircle-import-legacy-payout-corrections = "umacircle_bot.scripts.import_legacy_payout_corrections:main"
+umacircle-import-full-historical-ledger = "umacircle_bot.scripts.import_full_historical_ledger:main"
+umacircle-apply-historical-placement-correction = "umacircle_bot.scripts.apply_historical_placement_correction:main"
+umacircle-import-win5-first-baseline = "umacircle_bot.scripts.import_win5_first_baseline:main"
+umacircle-import-dry-run = "umacircle_bot.scripts.import_from_xlsx:main"
+umacircle-export-circle-points = "umacircle_bot.scripts.export_circle_points:main"
+umacircle-export-win5 = "umacircle_bot.scripts.export_win5:main"
+umacircle-preflight-player-link-cutover = "umacircle_bot.scripts.preflight_player_link_cutover:main"
+umacircle-seed-rating-rules = "umacircle_bot.scripts.seed_rating_rules:main"
+umacircle-persona-link-console = "umacircle_bot.scripts.persona_link_console:main"
+umacircle-export-rebuild-source = "umacircle_bot.scripts.export_rebuild_source:main"
+umacircle-import-rebuild-overlay = "umacircle_bot.scripts.import_rebuild_overlay:main"
+umacircle-preflight-fresh-win5-launch = "umacircle_bot.scripts.preflight_fresh_win5_launch:main"
+umacircle-preflight-win5-first-launch = "umacircle_bot.scripts.preflight_win5_first_launch:main"
+umacircle-replay-current-win5-epoch = "umacircle_bot.scripts.replay_current_win5_epoch:main"
+umacircle-reconcile-s5e-rebuild = "umacircle_bot.scripts.reconcile_s5e_rebuild:main"
+umacircle-reconcile-deferred-match-backfill = "umacircle_bot.scripts.reconcile_deferred_match_backfill:main"
+umacircle-backfill-legacy-ratings = "umacircle_bot.scripts.backfill_legacy_ratings:main"
+umacircle-build-legacy-identity-mapping = "umacircle_bot.scripts.build_legacy_identity_mapping_manifest:main"
+umacircle-apply-legacy-identity-mapping = "umacircle_bot.scripts.apply_legacy_identity_mapping:main"
+umacircle-build-legacy-source-accounts = "umacircle_bot.scripts.build_legacy_source_account_seed_manifest:main"
+umacircle-apply-legacy-source-accounts = "umacircle_bot.scripts.apply_legacy_source_account_seed:main"
+umacircle-build-legacy-rating-chain-disposition = "umacircle_bot.scripts.build_legacy_rating_chain_disposition_manifest:main"
+umacircle-apply-legacy-rating-chain-disposition = "umacircle_bot.scripts.apply_legacy_rating_chain_disposition:main"
+umacircle-safe-migrate = "umacircle_bot.scripts.safe_migrate:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4"]
+
+[tool.ruff.lint.isort]
+known-third-party = ["alembic"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = ["-p", "no:cacheprovider", "--strict-markers"]
+tmp_path_retention_count = 0
+tmp_path_retention_policy = "none"
+markers = [
+    "integration: requires an explicitly configured isolated MariaDB test database",
+    "historical: archived compatibility evidence outside the current release gate",
+    "jetson: requires the explicit exact-image disposable-clone release contract",
+    "mariadb_schema: Alembic, DDL, schema drift, and migration verification shard",
+    "mariadb_import_rebuild: import, rebuild, Rating backfill, and payout correction shard",
+    "mariadb_identity: account link, registration, operator attach, and grant shard",
+    "mariadb_match_betting: Circle Match betting and wallet concurrency shard",
+    "mariadb_match_lifecycle: Circle Match control, settlement, rollback, and Rating lock shard",
+    "mariadb_match_result_delivery: Match result, settings, publication, and channel delivery shard",
+    "mariadb_win5_core: WIN5 season, round, submission, result, and scoring shard",
+    "mariadb_win5_replay: current WIN5 replay and deferred-backfill reconciliation shard",
+]
