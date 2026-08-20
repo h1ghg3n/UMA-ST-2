@@ -25,18 +25,6 @@ RUN pip install --no-cache-dir .
 COPY alembic.ini ./
 COPY alembic ./alembic
 
-FROM base AS test
-
-RUN pip install --no-cache-dir ".[dev]"
-
-COPY Dockerfile docker-compose.yml docker-compose.integration.yml ./
-COPY scripts ./scripts
-COPY tests ./tests
-
-USER app
-
-CMD ["python", "-m", "pytest", "-q", "-m", "not integration and not jetson"]
-
 FROM base AS runtime
 
 USER app
