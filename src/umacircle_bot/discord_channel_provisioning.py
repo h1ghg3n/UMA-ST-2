@@ -73,14 +73,14 @@ async def resolve_or_create_default_channel(
                 created = await guild.create_text_channel(
                     default_name,
                     overwrites=overwrites,
-                    reason="Umacircle bot managed log channel provisioning",
+                    reason="UMA-ST-2 bot managed log channel provisioning",
                 )
                 if not _has_private_log_permissions(created, overwrites):
                     return None
                 return created
             return await guild.create_text_channel(
                 default_name,
-                reason="Umacircle bot managed announcement channel provisioning",
+                reason="UMA-ST-2 bot managed announcement channel provisioning",
             )
     except Exception:
         log_sanitized_exception(
@@ -120,7 +120,7 @@ async def _prepare_resolved_channel(
     overwrites = _private_log_overwrites(guild, staff_role_ids)
     edited = await channel.edit(
         overwrites=overwrites,
-        reason="Umacircle bot managed log channel permission enforcement",
+        reason="UMA-ST-2 bot managed log channel permission enforcement",
     )
     resolved = edited or channel
     return resolved if _has_private_log_permissions(resolved, overwrites) else None

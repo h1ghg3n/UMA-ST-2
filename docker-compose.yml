@@ -41,7 +41,7 @@ services:
     depends_on:
       mariadb:
         condition: service_healthy
-    command: ["umacircle-safe-migrate"]
+    command: ["uma-st-2-safe-migrate"]
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777

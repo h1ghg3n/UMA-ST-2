@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     owner_role_id: int = Field(default=0, ge=0, le=2**64 - 1, alias="OWNER_ROLE_ID")
 
     database_url: str = Field(
-        default="mysql+pymysql://umacircle:change-me@mariadb:3306/umacircle?charset=utf8mb4",
+        default="mysql+pymysql://uma_st2:change-me@mariadb:3306/uma_st2?charset=utf8mb4",
         alias="DATABASE_URL",
     )
 
