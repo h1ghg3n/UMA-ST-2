@@ -191,7 +191,7 @@ features, and the V2 database redesign are outside the V1 scope.
 
 The UMA-ST-2 source code is provided under the [MIT License](LICENSE).
 
-Copyright © 2026 pianory, 꼬돌이, and the UMA-ST-2 contributors.
+Copyright © 2026 h1ghg3n.
 
 Uma Musume: Pretty Derby and related game names, trademarks, and copyrighted materials belong to
 Cygames, Inc. and their respective rights holders.
@@ -202,8 +202,9 @@ UMA-ST-2 is an unofficial community project. It is not affiliated with, sponsore
 by Cygames, Inc. or other respective rights holders. This game-related notice does not apply to the
 original source code of this project.
 
-See [AUTHORS.md](AUTHORS.md) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for attribution and
-third-party license information.
+See [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md) and
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for domain contributions and third-party license
+information.
 
 ---
 
@@ -336,7 +337,7 @@ V2 database redesignはV1の範囲外です。
 
 UMA-ST-2のソースコードは[MIT License](LICENSE)で提供されます。
 
-Copyright © 2026 pianory, 꼬돌이, and the UMA-ST-2 contributors.
+Copyright © 2026 h1ghg3n.
 
 『ウマ娘 プリティーダービー』および関連する名称、商標、著作物の権利は、Cygames, Inc.および
 各権利者に帰属します。
@@ -346,7 +347,7 @@ Copyright © 2026 pianory, 꼬돌이, and the UMA-ST-2 contributors.
 UMA-ST-2は非公式のコミュニティプロジェクトです。Cygames, Inc.および各権利者との提携、後援、
 承認関係はありません。このゲーム関連の権利表示は、本projectが独自に作成したsource codeには適用されません。
 
-著作者と第三者ライセンスの詳細は[AUTHORS.md](AUTHORS.md)および
+ドメイン面での協力と第三者ライセンスの詳細は[ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md)および
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)を参照してください。
 
 ---
@@ -485,7 +486,7 @@ AI/LLM 기능과 V2 database redesign은 V1 범위에 포함되지 않습니다.
 
 UMA-ST-2의 소스 코드는 [MIT License](LICENSE)로 배포됩니다.
 
-Copyright © 2026 pianory, 꼬돌이, and the UMA-ST-2 contributors.
+Copyright © 2026 h1ghg3n.
 
 『우마무스메 프리티 더비』 및 관련 게임 명칭, 상표와 저작물의 권리는 Cygames, Inc. 및 각 권리자에게
 있습니다.
@@ -496,5 +497,5 @@ UMA-ST-2는 비공식 커뮤니티 프로젝트입니다. Cygames, Inc. 또는 �
 프로젝트가 아닙니다. 이 게임 관련 권리 고지는 프로젝트가 독자적으로 작성한 source code에는 적용되지
 않습니다.
 
-저작자와 제3자 라이선스에 대한 자세한 내용은 [AUTHORS.md](AUTHORS.md)와
+도메인 기여와 제3자 라이선스에 대한 자세한 내용은 [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md)와
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 참고하십시오.
