@@ -1,14 +1,14 @@
-# UmaCircle V1 Architecture
+# UMA-ST-2 V1 Architecture
 
 > Scope: public `maintenance/v1` architecture only.
 >
 > This document intentionally excludes the V2 Web/OCR/Model Router/Resource Router architecture.
 
-![UmaCircle V1 architecture](architecture.svg)
+![UMA-ST-2 V1 architecture](architecture.svg)
 
 ## 1. Overview
 
-UmaCircle V1 is a Discord-first modular monolith backed by MariaDB.
+UMA-ST-2 V1 is a Discord-first modular monolith backed by MariaDB.
 
 The main runtime path is:
 
@@ -147,7 +147,7 @@ The public maintenance deployment uses Docker Compose.
 ```text
 Docker Compose
 ├─ bot
-│   └─ UmaCircle V1 runtime
+│   └─ UMA-ST-2 V1 runtime
 ├─ migrate
 │   └─ safe migration command
 └─ mariadb

@@ -29,7 +29,7 @@ def configure_logging() -> None:
     )
 
 
-class UmacircleBot(commands.Bot):
+class UmaST2Bot(commands.Bot):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.tree.add_command(AccountCommandGroup())
@@ -61,9 +61,9 @@ class UmacircleBot(commands.Bot):
         )
 
 
-def build_bot() -> UmacircleBot:
+def build_bot() -> UmaST2Bot:
     intents = discord.Intents.default()
-    return UmacircleBot(command_prefix="!", intents=intents)
+    return UmaST2Bot(command_prefix="!", intents=intents)
 
 
 def main() -> None:

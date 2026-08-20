@@ -41,4 +41,4 @@ FROM base AS runtime
 
 USER app
 
-CMD ["umacircle-bot"]
+CMD ["uma-st-2"]

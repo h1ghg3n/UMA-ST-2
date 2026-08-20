@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="900" viewBox="0 0 1280 900" role="img" aria-labelledby="title desc">
-  <title id="title">UmaCircle V1 Architecture</title>
+  <title id="title">UMA-ST-2 V1 Architecture</title>
   <desc id="desc">Discord-first modular monolith with application transaction boundary, SQLAlchemy, MariaDB, and separate maintenance tooling.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
@@ -27,7 +27,7 @@
   </defs>
 
   <rect class="bg" x="0" y="0" width="1280" height="900"/>
-  <text class="title" x="640" y="55" text-anchor="middle">UmaCircle V1 Architecture</text>
+  <text class="title" x="640" y="55" text-anchor="middle">UMA-ST-2 V1 Architecture</text>
   <text class="subtitle" x="640" y="82" text-anchor="middle">Public maintenance/v1 runtime and maintenance boundaries</text>
 
   <!-- Users / Discord -->
