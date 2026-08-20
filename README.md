@@ -191,7 +191,7 @@ features, and the V2 database redesign are outside the V1 scope.
 
 The UMA-ST-2 source code is provided under the [MIT License](LICENSE).
 
-Copyright © 2026 PianoryX, 꼬돌이, and the UMA-ST-2 contributors.
+Copyright © 2026 pianory, 꼬돌이, and the UMA-ST-2 contributors.
 
 Uma Musume: Pretty Derby and related game names, trademarks, and copyrighted materials belong to
 Cygames, Inc. and their respective rights holders.
@@ -336,7 +336,7 @@ V2 database redesignはV1の範囲外です。
 
 UMA-ST-2のソースコードは[MIT License](LICENSE)で提供されます。
 
-Copyright © 2026 PianoryX, 꼬돌이, and the UMA-ST-2 contributors.
+Copyright © 2026 pianory, 꼬돌이, and the UMA-ST-2 contributors.
 
 『ウマ娘 プリティーダービー』および関連する名称、商標、著作物の権利は、Cygames, Inc.および
 各権利者に帰属します。
@@ -485,7 +485,7 @@ AI/LLM 기능과 V2 database redesign은 V1 범위에 포함되지 않습니다.
 
 UMA-ST-2의 소스 코드는 [MIT License](LICENSE)로 배포됩니다.
 
-Copyright © 2026 PianoryX, 꼬돌이, and the UMA-ST-2 contributors.
+Copyright © 2026 pianory, 꼬돌이, and the UMA-ST-2 contributors.
 
 『우마무스메 프리티 더비』 및 관련 게임 명칭, 상표와 저작물의 권리는 Cygames, Inc. 및 각 권리자에게
 있습니다.
