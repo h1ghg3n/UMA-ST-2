@@ -2,6 +2,15 @@
 
 UMA-ST-2 is a Discord-based event and data management service for Umamusume communities.
 
+## Development status
+
+| Version | Status | Scope |
+|---|---|---|
+| V1 | MAINTENANCE | Current executable public Discord/MariaDB service |
+| V2 | ACTIVE DEVELOPMENT | Architecture and feature rewrite tracked separately |
+
+V1 remains the runnable code in this public repository and is maintained for operational fixes and compatibility. V2 is the active development line; its feature-by-feature progress and the current WIN5 vertical slice are tracked in [ROADMAP.md](ROADMAP.md).
+
 [English](#english) · [日本語](#日本語) · [한국어](#한국어)
 
 ![UMA-ST-2 V1 architecture](architecture.svg)
@@ -96,7 +105,7 @@ OWNER_ROLE_ID=your-owner-role-id
 MYSQL_DATABASE=uma_st2
 MYSQL_USER=uma_st2
 MYSQL_PASSWORD=replace-this-password
-MYSQL_ROOT_PASSWORD=replace-this-root-password
+MYSQL_ROOT_PASSWORD=replace-this-password
 
 DATABASE_URL=mysql+pymysql://uma_st2:replace-this-password@mariadb:3306/uma_st2?charset=utf8mb4
 ```
@@ -307,48 +316,45 @@ docker compose run --rm bot \
   --confirm-checksum <reviewed-sha256>
 ```
 
-作成済みのRating rule versionは変更されません。
+作成済みRating rule versionは変更されません。
 
 ## 主なDiscord command
 
-一般メンバーは`/help`、`/account register`、`/account info`、`/match races`、`/match bet`、
-`/win5 info`、`/win5 rounds`、`/win5 submit`、`/win5 special-submit`、`/win5 submissions`、
+一般メンバーは`/help`、`/account register`、`/account info`、`/match races`、`/match bet`,
+`/win5 info`、`/win5 rounds`、`/win5 submit`、`/win5 special-submit`、`/win5 submissions`,
 `/win5 cancel`、`/win5 standings`を使用できます。
 
 運営commandは`/staff`、`/staff persona`、`/match staff`、`/win5 staff`、`/settings`、`/export`に
-分かれています。XLSX出力には`/export win5 season`と`/export circle-points`を使用します。
+分かれています。XLSX出力에는 `/export win5 season`과 `/export circle-points`를 사용합니다.
 
-Legacy account linkは初期状態で無効です。専用の確認およびcutover手順を完了せずに有効化しないでください。
+Legacy account link는 초기상태에서 비활성입니다. 전용 확인 및 cutover 절차를 완료하지 않고 활성화하지 마십시오.
 
-## データ、復旧、セキュリティ
+## 데이터、復旧、セキュリティ
 
-MariaDBが稼働中データのsource of truthです。V1に含まれるlegacy import、replay、reconciliation、
-rebuild commandは特定の過去データを復旧するためのmaintenance toolであり、汎用migration APIではありません。
+MariaDB가 운영 데이터의 source of truth입니다. V1에 포함된 legacy import、replay、reconciliation、
+rebuild command는 특정 과거 데이터 복구용 maintenance tool이며 범용 migration API가 아닙니다.
 
-新規環境ではfresh MariaDB、Alembic migration、Rating rule seed、検証済みMariaDB backupを使用してください。
-Bot Tokenをcommitせず、強力なDB passwordとDiscord Role IDによる権限管理を使用してください。
+신규 환경에서는 fresh MariaDB、Alembic migration、Rating rule seed와 검증된 MariaDB backup을 사용하십시오.
+Bot Token을 commit하지 말고 강력한 DB password와 Discord Role ID 기반 권한 관리를 적용하십시오.
 
-## プロジェクト範囲
+## 프로젝트 범위
 
-このrepositoryにはV1 Discord・MariaDB serviceが含まれます。Web application、OAuth、OCR、AI/LLM機能、
-V2 database redesignはV1の範囲外です。
+이 repository에는 V1 Discord·MariaDB service가 포함됩니다. Web application、OAuth、OCR、AI/LLM 기능과
+V2 database redesign은 V1 범위에 포함되지 않습니다.
 
-## ライセンスと第三者の権利
+## 라이선스와 제3자 권리
 
-UMA-ST-2のソースコードは[MIT License](LICENSE)で提供されます。
+UMA-ST-2 소스 코드는 [MIT License](LICENSE)로 배포됩니다.
 
 Copyright © 2026 h1ghg3n.
 
-『ウマ娘 プリティーダービー』および関連する名称、商標、著作物の権利は、Cygames, Inc.および
-各権利者に帰属します。
+『우마무스메 프리티 더비』 및 관련 게임 명칭, 상표와 저작물의 권리는 Cygames, Inc. 및 각 권리자에게 있습니다.
 
 © Cygames, Inc.
 
-UMA-ST-2は非公式のコミュニティプロジェクトです。Cygames, Inc.および各権利者との提携、後援、
-承認関係はありません。このゲーム関連の権利表示は、本projectが独自に作成したsource codeには適用されません。
+UMA-ST-2는 비공식 커뮤니티 프로젝트입니다. Cygames, Inc. 또는 다른 권리자와 제휴하거나 후원·승인받은 프로젝트가 아닙니다. 이 게임 관련 권리 고지는 프로젝트가 독자적으로 작성한 source code에는 적용되지 않습니다.
 
-ドメイン面での協力と第三者ライセンスの詳細は[ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md)および
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)を参照してください。
+도메인 기여와 제3자 라이선스에 대한 자세한 내용은 [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md)와 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 참고하십시오.
 
 ---
 
