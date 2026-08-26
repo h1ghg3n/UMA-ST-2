@@ -57,7 +57,7 @@ V2 개발 상태는 아래 roadmap으로 추적하며, public V1 runtime과 혼�
 
 ## WIN5 — Round lifecycle / setup
 
-현재 진행 중인 vertical slice만 Phase 수준까지 펼칩니다.
+현재 진행 중인 vertical slice의 Phase 진행도는 이렇습니다.
 
 | Phase | Scope | Status |
 |---|---|---|
