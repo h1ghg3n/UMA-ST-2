@@ -38,6 +38,7 @@ async def send_followup_safely(
     *,
     response_kind: str = "success",
     file_path: Path | None = None,
+    embed: discord.Embed | None = None,
     view: discord.ui.View | None = None,
 ) -> bool:
     try:
@@ -47,6 +48,8 @@ async def send_followup_safely(
         }
         if file_path is not None:
             send_options["file"] = discord.File(file_path)
+        if embed is not None:
+            send_options["embed"] = embed
         if view is not None:
             send_options["view"] = view
         await interaction.followup.send(content, **send_options)

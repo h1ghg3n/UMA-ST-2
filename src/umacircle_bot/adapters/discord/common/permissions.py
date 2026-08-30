@@ -74,6 +74,7 @@ COMMAND_ACCESS_MATRIX = MappingProxyType(
         "win5.staff.season": CommandAccess.OPERATOR,
         "win5.staff.round": CommandAccess.OPERATOR,
         "match.races": CommandAccess.MEMBER,
+        "match.ratings": CommandAccess.MEMBER,
         "match.bet": CommandAccess.MEMBER,
         "win5.info": CommandAccess.MEMBER,
         "win5.rounds": CommandAccess.MEMBER,
