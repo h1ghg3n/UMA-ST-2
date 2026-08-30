@@ -13,7 +13,11 @@ from umacircle_bot.domain.errors import DomainError
 from umacircle_bot.logging_safety import log_sanitized_exception
 from umacircle_bot.services.autocomplete_queries import AutocompleteChoice
 from umacircle_bot.services.dtos import MatchBetDTO
+from umacircle_bot.services.match_reporting import GameAccountRatingDTO
 from umacircle_bot.services.race_queries import OpenMatchRace
+
+_RATING_SCOREBOARD_FIELD_LIMIT = 1024
+_RATING_SCOREBOARD_ROW_LIMIT = 25
 
 
 class PrepareCommandPort(Protocol):
@@ -73,6 +77,7 @@ class SendFollowupPort(Protocol):
         content: str,
         *,
         response_kind: str = "success",
+        embed: discord.Embed | None = None,
     ) -> bool: ...
 
 
@@ -81,6 +86,7 @@ class MatchMemberAdapterPorts:
     prepare_command: PrepareCommandPort
     autocomplete_authorized: AutocompleteAuthorizedPort
     query_races: Callable[[], Sequence[OpenMatchRace]]
+    query_ratings: Callable[[], Sequence[GameAccountRatingDTO]]
     query_bet_races: Callable[[str], tuple[AutocompleteChoice, ...]]
     query_bet_accounts: Callable[[str, str], tuple[AutocompleteChoice, ...]]
     place_bet: PlaceMatchBetPort
@@ -116,6 +122,34 @@ class MatchMemberAdapter:
             return
         content = self.format_races(races) if races else "현재 베팅 가능한 룸매치 레이스가 없습니다."
         await self.ports.send_followup(interaction, command_name, content)
+
+    async def list_ratings(self, interaction: discord.Interaction) -> None:
+        command_name = "match.ratings"
+        if await self.ports.prepare_command(interaction, command_name) is None:
+            return
+        try:
+            ratings = await run_blocking_application(self.ports.query_ratings)
+        except Exception:
+            await self.ports.send_internal_error(interaction, command_name)
+            return
+
+        if not ratings:
+            await self.ports.send_followup(
+                interaction,
+                command_name,
+                "현재 표시할 룸매치 Rating 기록이 없습니다.",
+            )
+            return
+
+        for embed in self.format_rating_scoreboard_pages(ratings):
+            delivered = await self.ports.send_followup(
+                interaction,
+                command_name,
+                "\u200b",
+                embed=embed,
+            )
+            if not delivered:
+                return
 
     async def place_bet(
         self,
@@ -223,6 +257,58 @@ class MatchMemberAdapter:
             lines.append(f"#{race.race_id} {name} / {starts_at}{participant_count}")
         return self.ports.bounded_message(lines)
 
+    def format_rating_scoreboard_pages(
+        self,
+        ratings: Sequence[GameAccountRatingDTO],
+    ) -> tuple[discord.Embed, ...]:
+        rows = tuple(self._format_rating_scoreboard_row(rating) for rating in ratings)
+        page_rows: list[list[tuple[str, str, str]]] = []
+        current: list[tuple[str, str, str]] = []
+        for row in rows:
+            candidate = [*current, row]
+            if current and not _rating_scoreboard_rows_fit(candidate):
+                page_rows.append(current)
+                current = [row]
+            else:
+                current = candidate
+        if current:
+            page_rows.append(current)
+
+        page_count = len(page_rows)
+        embeds: list[discord.Embed] = []
+        for page_number, page in enumerate(page_rows, start=1):
+            embed = discord.Embed(title=f"룸매치 Rating 순위표 · {page_number}/{page_count}")
+            embed.add_field(
+                name="이름",
+                value="\n".join(row[0] for row in page),
+                inline=True,
+            )
+            embed.add_field(
+                name="Rating",
+                value="\n".join(row[1] for row in page),
+                inline=True,
+            )
+            embed.add_field(
+                name="순위",
+                value="\n".join(row[2] for row in page),
+                inline=True,
+            )
+            embeds.append(embed)
+        return tuple(embeds)
+
+    def _format_rating_scoreboard_row(
+        self,
+        rating: GameAccountRatingDTO,
+    ) -> tuple[str, str, str]:
+        owner_name = rating.current_owner_display_name or "연결 없음"
+        normalized_owner_name = owner_name.replace("\r", " ").replace("\n", " ")
+        safe_owner_name = self.ports.safe_text(normalized_owner_name[:100])
+        return (
+            safe_owner_name,
+            f"{rating.current_rating:.1f}",
+            str(rating.competition_rank),
+        )
+
 
 class MatchMemberCommandGroup(app_commands.Group):
     def __init__(
@@ -253,6 +339,10 @@ class MatchMemberCommandGroup(app_commands.Group):
     @app_commands.command(name="races", description="베팅 가능한 룸매치 레이스를 조회합니다.")
     async def races(self, interaction: discord.Interaction) -> None:
         await self._adapter.list_races(interaction)
+
+    @app_commands.command(name="ratings", description="현재 룸매치 Rating 순위표를 조회합니다.")
+    async def ratings(self, interaction: discord.Interaction) -> None:
+        await self._adapter.list_ratings(interaction)
 
     @app_commands.command(name="bet", description="등록 PID로 서클 포인트를 베팅합니다.")
     @app_commands.describe(
@@ -300,3 +390,9 @@ def parse_match_numbers(value: str) -> list[int]:
     if not parts or any(not part or not part.isascii() or not part.isdigit() for part in parts):
         raise ValueError("bet numbers must be ASCII positive integers separated by commas or hyphens")
     return [int(part) for part in parts]
+
+
+def _rating_scoreboard_rows_fit(rows: Sequence[tuple[str, str, str]]) -> bool:
+    if len(rows) > _RATING_SCOREBOARD_ROW_LIMIT:
+        return False
+    return all(len("\n".join(row[column] for row in rows)) <= _RATING_SCOREBOARD_FIELD_LIMIT for column in range(3))

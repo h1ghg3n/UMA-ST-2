@@ -206,6 +206,8 @@ from umacircle_bot.services.match_odds_snapshots import MatchOddsInput
 from umacircle_bot.services.match_races import (
     RegisteredFinalEntrySnapshotInput,
 )
+from umacircle_bot.services.match_reporting import GameAccountRatingDTO
+from umacircle_bot.services.match_reporting_application import query_game_account_rating_report
 from umacircle_bot.services.match_result_notifications import MatchResultNotificationDTO
 from umacircle_bot.services.match_results import MatchResultOperationDTO
 from umacircle_bot.services.match_settlement import MatchSettlementOperationDTO
@@ -2719,7 +2721,7 @@ async def help_command(interaction: discord.Interaction) -> None:
         "help",
         "\n".join(
             [
-                "[사용자] `/account register` · `/account info` · `/match races` · `/match bet`",
+                "[사용자] `/account register` · `/account info` · `/match races` · `/match ratings` · `/match bet`",
                 "[기존 기록 연결] `/account link-request` 후 운영자가 `/staff link-player`로 승인합니다.",
                 "[신규 등록] `/account register`는 승인 대기 요청만 생성하며, "
                 "`/account cancel-registration confirm:취소`로 대기 요청을 취소할 수 있습니다.",
@@ -5083,6 +5085,10 @@ def _match_member_query_races() -> tuple[OpenMatchRace, ...]:
     return _list_room_match_races()
 
 
+def _match_member_query_ratings() -> tuple[GameAccountRatingDTO, ...]:
+    return query_game_account_rating_report()
+
+
 def _match_member_query_bet_races(current: str) -> tuple[AutocompleteChoice, ...]:
     return query_member_match_bet_races(query=current)
 
@@ -5139,12 +5145,14 @@ async def _match_member_send_followup(
     content: str,
     *,
     response_kind: str = "success",
+    embed: discord.Embed | None = None,
 ) -> bool:
     return await _send_followup_safely(
         interaction,
         command_name,
         content,
         response_kind=response_kind,
+        embed=embed,
     )
 
 
@@ -5153,6 +5161,7 @@ _MATCH_MEMBER_ADAPTER = MatchMemberAdapter(
         prepare_command=_match_member_prepare_command,
         autocomplete_authorized=_match_member_autocomplete_authorized,
         query_races=_match_member_query_races,
+        query_ratings=_match_member_query_ratings,
         query_bet_races=_match_member_query_bet_races,
         query_bet_accounts=_match_member_query_bet_accounts,
         place_bet=_match_member_place_bet,
