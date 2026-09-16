@@ -1,219 +1,128 @@
-# UMA-ST-2 V1 Architecture
+# UMA-ST-2 V2 Architecture
 
-> Scope: public `maintenance/v1` architecture only.
->
-> This document intentionally excludes the V2 Web/OCR/Model Router/Resource Router architecture.
+## 범위
 
-![UMA-ST-2 V1 architecture](architecture.svg)
+이 문서는 public V2 snapshot의 실행 구조만 설명합니다. Private V1→V2 transition, replay, cutover와
+실제 운영환경 구성은 다루지 않습니다.
 
-## 1. Overview
+## 구조
 
-UMA-ST-2 V1 is a Discord-first modular monolith backed by MariaDB.
-
-The main runtime path is:
+UMA-ST-2는 layer-first modular monolith입니다.
 
 ```text
-Discord
-  -> Discord command / adapter layer
-  -> application command or query boundary
-  -> domain/service logic
-  -> SQLAlchemy persistence
-  -> MariaDB
+Discord / CLI -> Adapters -> Application -> Domain
+                               ^
+                               |
+                        Infrastructure
+                          /          \
+                     MariaDB     Discord API
 ```
 
-CLI maintenance tools use the same service and persistence code where practical, but import,
-export, migration, rebuild, replay, and cutover tooling are not part of the normal Discord
-request path.
+Dependency 방향은 `adapter -> application -> domain`입니다. Infrastructure는 Application이 정의한
+outbound boundary를 구현합니다. 구체적인 dependency 조립은 Composition Root에서만 수행합니다.
 
-## 2. Runtime components
+## Layer 역할
 
-### Discord runtime
+### Domain
 
-`umacircle_bot.bot` is the process entry point for the normal V1 service.
+Domain은 외부 framework에 의존하지 않는 business meaning과 계산을 소유합니다.
 
-At startup it:
+- Persona와 GameAccount identity
+- Circle Point value와 balance rule
+- Match, Betting, Rating과 Settlement rule
+- WIN5 lifecycle과 scoring
+- Publication state
 
-1. loads and validates runtime settings;
-2. verifies the target database with the runtime preflight;
-3. configures the process-scoped SQLAlchemy Engine and connection pool;
-4. creates and starts the Discord bot;
-5. disposes the Engine during process shutdown.
+Domain은 Discord SDK, SQLAlchemy, process configuration을 import하지 않습니다.
 
-The Discord layer exposes the main user and operator surfaces:
+### Application
 
-- account registration and identity operations;
-- Circle Match lookup, betting, result, settlement, and staff controls;
-- WIN5 participation and staff controls;
-- guild settings;
-- Point/account administration;
-- XLSX export commands.
+Application은 use case, authorization decision, transaction 의미와 outbound port를 소유합니다.
 
-Discord handlers should not own SQLAlchemy `Session`, transaction commit/rollback, or row-lock
-semantics directly.
+- state-changing command orchestration
+- read-only query orchestration
+- Unit of Work 경계
+- settlement와 rollback 순서
+- publication intent 생성
 
-### Application boundary
+Application은 concrete SQLAlchemy `Session`이나 Discord interaction object를 받지 않습니다.
 
-V1 uses explicit application command/query runners.
+### Adapters
 
-- **Command**: owns one state-changing transaction boundary and commits on success.
-- **Query**: is read-only, rejects ORM/SQL writes, and explicitly rolls back the read transaction.
-- **Failure**: rolls back the operation.
-- **Completion**: closes the operation-scoped Session.
+Adapters는 외부 요청과 Application command/query 사이를 변환합니다.
 
-This keeps transaction lifecycle out of Discord handlers even though V1 is not yet the fully
-recomposed V2 architecture.
+- Discord slash command, View와 Modal
+- CLI argument와 출력
+- Application result의 사용자 표시
 
-### Engine and Session lifecycle
+Adapter는 database commit, rollback과 ORM mutation을 직접 수행하지 않습니다.
 
-The SQLAlchemy Engine and connection pool are process scoped.
+### Infrastructure
+
+Infrastructure는 Application port의 concrete implementation을 제공합니다.
+
+- SQLAlchemy ORM과 repository
+- MariaDB Engine, Session과 Unit of Work
+- Discord publication delivery
+- XLSX rendering
+- Master-data와 Rating-rule input
+
+## Runtime lifecycle
+
+하나의 실행 runtime이 SQLAlchemy Engine과 connection pool을 소유합니다. 각 Application operation은 별도
+Session과 짧은 Unit of Work를 사용합니다.
 
 ```text
-Bot process
-  -> one Engine / connection pool
-      -> operation A: Session A
-      -> operation B: Session B
-      -> operation C: Session C
+Process
+  -> Engine / Pool
+      -> Operation A / Session A
+      -> Operation B / Session B
 ```
 
-A running process cannot be rebound to another database URL. A concrete Session is created per
-application operation and closed after that operation.
+성공한 mutation은 Unit of Work가 commit하고, 실패한 mutation은 rollback합니다. 외부 Discord 전송을 기다리는
+동안 MariaDB transaction이나 row lock을 유지하지 않습니다.
 
-## 3. Code organization
+## 주요 data ownership
 
-The V1 tree is transitional rather than a perfectly clean layered architecture.
+- Persona: Discord access, Circle Point와 WIN5 owner
+- DiscordAccount: Discord actor identity
+- GameAccount: Circle Match Entry, Result와 Rating provenance
+- Match: 조건, Entry, Betting, Result와 Settlement lifecycle
+- WIN5 Season/Round: WIN5 submission, result와 score lifecycle
 
-Important areas include:
+Rating은 GameAccount별로 관리하며 Circle Point는 Persona가 소유합니다.
 
-```text
-src/umacircle_bot/
-├─ bot.py                  # Discord process entry point
-├─ config.py               # runtime configuration
-├─ runtime_preflight.py    # database/runtime startup checks
-├─ db/                     # SQLAlchemy models and session lifecycle
-├─ adapters/discord/       # newer Discord adapter code
-├─ domain/                 # extracted business rules / domain logic
-├─ services/               # application services, persistence orchestration, legacy/rebuild logic
-├─ sheets/                 # XLSX-oriented parsing / workbook support
-├─ scripts/                # CLI import/export/rebuild/migration/preflight tools
-├─ discord_commands.py     # large legacy Discord command surface
-├─ discord_delivery.py     # Discord publication/delivery
-└─ discord_channel_provisioning.py
-```
+## Publication
 
-V1 contains both newer layered code and older compatibility/legacy code. The maintenance branch
-preserves that mixed structure for stability rather than continuing a large internal rewrite.
+공개 메시지의 의미는 Application에서 결정하고, Discord 전송은 database commit 이후 수행합니다. Delivery
+failure는 이미 확정된 canonical business state를 되돌리지 않습니다.
 
-## 4. Persistence
+## Database와 migration
 
-MariaDB is the authoritative runtime datastore.
+MariaDB가 runtime source of truth입니다. Public V2는 하나의 fresh Alembic baseline과 이후 V2 migration만
+제공합니다. V1 schema를 public V2 schema로 변환하는 migration은 포함하지 않습니다.
 
-SQLAlchemy is used for ORM and transaction handling, with Alembic for the V1 schema history.
+## Deployment
 
-Major persisted concepts include:
-
-- Persona and Discord/Game accounts;
-- Circle Point balances and ledger/history;
-- Circle Match races, entries, results, bets, settlement, and Rating;
-- WIN5 seasons, rounds, submissions, results, and scoring;
-- guild settings and Discord publication state;
-- import/rebuild/reconciliation state required by the V1 maintenance model.
-
-The normal service must not treat XLSX files as the authoritative live database.
-
-## 5. Import and export boundary
-
-V1 includes multiple CLI and Discord-facing import/export tools.
-
-Conceptually:
-
-```text
-XLSX / JSON / legacy source
-  -> parser / compatibility mapping
-  -> application/service validation
-  -> MariaDB
-
-MariaDB
-  -> application/service query
-  -> XLSX / JSON export
-```
-
-Import, backfill, migration, rebuild, and cutover tools are operational tooling and are kept
-separate from the normal Discord runtime path.
-
-## 6. Deployment
-
-The public maintenance deployment uses Docker Compose.
+기본 Compose package는 다음 service를 사용합니다.
 
 ```text
 Docker Compose
-├─ bot
-│   └─ UMA-ST-2 V1 runtime
+├─ mariadb
 ├─ migrate
-│   └─ safe migration command
-└─ mariadb
-    └─ MariaDB 11.4.x
+└─ bot
 ```
 
-The bot waits for MariaDB health and migration completion before normal startup.
+Credential은 host의 secret file에서 `/run/secrets/`로 mount합니다. Bot image에는 credential, 운영 데이터,
+test와 private document를 포함하지 않습니다.
 
-Persistent database data is stored in a Docker volume. Export, backup, and application data
-directories are mounted separately where configured.
+## 제외된 범위
 
-## 7. Legacy replay and rebuild tooling
+- V1→V2 transition과 historical replay
+- 실제 community data와 protected manifest
+- Jetson-specific cutover procedure
+- Web/OAuth adapter
+- OCR과 AI/LLM execution
+- generic event bus와 microservice 분할
 
-V1 contains substantial replay, rebuild, backfill, and historical reconciliation code. These tools
-exist because V1 accumulated several data-model and migration generations during development.
-
-They should **not** be interpreted as a simple, general-purpose recovery API.
-
-Important limitations:
-
-- some older replay/rebuild lanes were superseded by later V1 recovery decisions;
-- some replay paths are preserved as historical implementation evidence rather than final release
-  authority;
-- the bounded current WIN5 replay was validated as a disposable rehearsal, not as a generic
-  production cutover mechanism;
-- several legacy compatibility paths depend on specific manifests, historical assumptions, frozen
-  XLSX inputs, or reviewed identity mappings;
-- production rollback is based on a verified database snapshot rather than assuming that the full
-  historical Alembic downgrade/replay chain is a reliable recovery mechanism.
-
-For public V1 use, these commands should be considered **maintenance/recovery tooling with narrow
-preconditions**. They may be difficult or inappropriate to use outside the historical environment
-for which they were created.
-
-Normal users should prefer:
-
-```text
-normal runtime
-  -> MariaDB as source of truth
-  -> verified backup/restore for recovery
-  -> documented import/rebuild procedures only when their stated prerequisites are satisfied
-```
-
-## 8. Architectural constraints
-
-The V1 maintenance architecture follows these practical rules:
-
-1. Discord handlers do not own ORM Sessions or transaction commit/rollback.
-2. The application command/query boundary owns operation-level transaction behavior.
-3. The SQLAlchemy Engine/pool is process scoped; Sessions are operation scoped.
-4. Discord publication happens after the relevant database transaction is committed.
-5. Import, migration, replay, backfill, and cutover tooling remain outside the normal Discord
-   request path.
-6. MariaDB is the live source of truth.
-7. Legacy replay/rebuild tools are maintenance-only and must not be treated as a generic supported
-   runtime interface.
-8. V1 is maintained for stability; the larger architecture redesign belongs to V2 and is outside
-   this document.
-
-## 9. What is intentionally not shown
-
-The following belong to later V2 work and are intentionally excluded from this V1 diagram:
-
-- Web application runtime;
-- OCR workflows;
-- Model Router integration;
-- Resource Router / lease admission;
-- V2 composition root and package layout;
-- V2 canonical database redesign.
+이 기능들은 현재 public runtime의 정상 실행에 필요하지 않습니다.

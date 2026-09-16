@@ -1,0 +1,25 @@
+name: V2 MariaDB Schema
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  mariadb-schema:
+    name: MariaDB schema
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Run disposable MariaDB integration lane
+        run: ./scripts/run-mariadb-integration.sh

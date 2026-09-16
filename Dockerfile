@@ -1,32 +1,45 @@
-FROM python:3.12-slim AS base
+FROM python:3.13-slim-bookworm AS wheel-builder
 
-ARG APP_SOURCE_COMMIT=unknown
-ARG APP_UID=1000
-ARG APP_GID=1000
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-
-LABEL org.opencontainers.image.revision=${APP_SOURCE_COMMIT}
-
-WORKDIR /app
-
-RUN printf '%s\n' "$APP_SOURCE_COMMIT" > /app/.source-commit \
-    && chmod 0444 /app/.source-commit
-
-RUN groupadd --gid "$APP_GID" app \
-    && useradd --uid "$APP_UID" --gid "$APP_GID" --create-home --shell /usr/sbin/nologin app
+WORKDIR /build
 
 COPY pyproject.toml README.md ./
 COPY src ./src
 
-RUN pip install --no-cache-dir .
+RUN python -m pip wheel --no-cache-dir --wheel-dir /wheels .
 
-COPY alembic.ini ./
-COPY alembic ./alembic
 
-FROM base AS runtime
+FROM python:3.13-slim-bookworm AS runtime
 
-USER app
+ARG SOURCE_COMMIT=unrecorded
+
+LABEL org.opencontainers.image.title="UMA-ST-2" \
+      org.opencontainers.image.source="https://github.com/h1ghg3n/UMA-ST-2" \
+      org.opencontainers.image.revision="${SOURCE_COMMIT}"
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends ca-certificates tzdata \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 10001 uma-st2 \
+    && useradd --system --uid 10001 --gid 10001 --no-create-home \
+        --home-dir /nonexistent --shell /usr/sbin/nologin uma-st2
+
+WORKDIR /app
+
+COPY --from=wheel-builder /wheels /wheels
+RUN python -m pip install --no-cache-dir --no-index --find-links=/wheels uma-st-2 \
+    && rm -rf /wheels
+
+COPY --chown=10001:10001 alembic.ini ./alembic.ini
+COPY --chown=10001:10001 alembic ./alembic
+
+USER 10001:10001
 
 CMD ["uma-st-2"]

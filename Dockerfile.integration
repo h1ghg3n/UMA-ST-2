@@ -1,0 +1,18 @@
+FROM python:3.13-slim-bookworm
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+COPY pyproject.toml README.md ./
+COPY src ./src
+
+RUN python -m pip install --no-cache-dir ".[dev]"
+
+COPY alembic.ini pytest.ini ./
+COPY alembic ./alembic
+COPY tests ./tests
+
+CMD ["python", "-m", "pytest", "-q", "-m", "integration and not historical"]

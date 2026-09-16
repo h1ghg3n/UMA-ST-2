@@ -1,0 +1,112 @@
+name: V2 CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  fast:
+    name: Fast
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install development dependencies
+        run: python -m pip install --upgrade pip ".[dev]"
+
+      - name: Check formatting
+        run: python -m ruff format --check src tests alembic
+
+      - name: Run lint
+        run: python -m ruff check src tests alembic
+
+      - name: Run tests
+        run: python -m pytest -q -m "not integration and not jetson"
+
+      - name: Check changed lines for whitespace errors
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          base_sha="$PR_BASE_SHA"
+          if [[ -z "$base_sha" ]]; then
+            base_sha="$PUSH_BEFORE_SHA"
+          fi
+
+          if [[ -n "$base_sha" ]] && git cat-file -e "$base_sha^{commit}" 2>/dev/null; then
+            git diff --check "$base_sha" HEAD
+          else
+            git diff --check HEAD^ HEAD
+          fi
+
+  production-package:
+    name: Production package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      UMA_ST2_IMAGE: uma-st-2:ci
+      SOURCE_COMMIT: ${{ github.sha }}
+      DISCORD_TOKEN_FILE: secrets/discord_token
+      DISCORD_GUILD_ID: "123456789012345678"
+      MYSQL_DATABASE: uma_st_2
+      MYSQL_USER: uma_st_2
+      MYSQL_PASSWORD_FILE: secrets/mariadb_app_password
+      MYSQL_ROOT_PASSWORD_FILE: secrets/mariadb_root_password
+      WIN5_DELIVERY_POLL_INTERVAL_SECONDS: "10"
+      WIN5_DELIVERY_BATCH_SIZE: "10"
+      WIN5_DELIVERY_MAX_ATTEMPTS: "3"
+      WIN5_DELIVERY_RETRY_DELAY_SECONDS: "300"
+      WIN5_DELIVERY_PENDING_TIMEOUT_SECONDS: "900"
+      LOG_LEVEL: INFO
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Validate production Compose model
+        shell: bash
+        run: |
+          mkdir -p secrets
+          printf '%s\n' 'ci-compose-only' > secrets/mariadb_app_password
+          printf '%s\n' 'ci-compose-root-only' > secrets/mariadb_root_password
+          printf '%s\n' 'ci-discord-token-only' > secrets/discord_token
+          docker compose -f docker-compose.yml config --quiet
+
+      - name: Build production image
+        run: docker compose -f docker-compose.yml build migrate
+
+      - name: Smoke secret-backed migration
+        run: >-
+          docker compose -f docker-compose.yml --profile runtime up
+          --abort-on-container-exit --exit-code-from migrate mariadb migrate
+
+      - name: Clean up migration smoke
+        if: always()
+        run: docker compose -f docker-compose.yml --profile runtime down -v --remove-orphans
+
+      - name: Smoke installed runtime image
+        shell: bash
+        run: |
+          test "$(docker run --rm --entrypoint id "$UMA_ST2_IMAGE" -u)" = "10001"
+          docker run --rm --entrypoint python "$UMA_ST2_IMAGE" -c "import uma_st2"
+          docker run --rm --entrypoint python "$UMA_ST2_IMAGE" -m alembic heads
