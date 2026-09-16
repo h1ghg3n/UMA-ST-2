@@ -1,76 +1,101 @@
+name: uma-st-2-production
+
+x-uma-st2-image: &uma-st2-image
+  image: ${UMA_ST2_IMAGE:-uma-st-2:v2-local}
+  build:
+    context: .
+    dockerfile: Dockerfile
+    args:
+      SOURCE_COMMIT: ${SOURCE_COMMIT:-unrecorded}
+
 services:
-  bot:
-    build: .
-    environment:
-      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
-      DISCORD_TOKEN_FILE: /run/secrets/discord_token
-      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:?set DISCORD_GUILD_ID}
-      DISCORD_ADMIN_CHANNEL_IDS: ${DISCORD_ADMIN_CHANNEL_IDS:-}
-      OWNER_ROLE_ID: ${OWNER_ROLE_ID:-0}
-      APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Seoul}
-      APP_UTC_OFFSET_MINUTES: ${APP_UTC_OFFSET_MINUTES:-540}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      ENABLE_LEGACY_PLAYER_LINK: ${ENABLE_LEGACY_PLAYER_LINK:-false}
-      DEFAULT_MATCH_POINTS: ${DEFAULT_MATCH_POINTS:-500}
-      MIN_MATCH_BET_AMOUNT: ${MIN_MATCH_BET_AMOUNT:-10}
-      MAX_MATCH_BET_AMOUNT: ${MAX_MATCH_BET_AMOUNT:-21474836470}
-      BET_CLOSE_MINUTES: ${BET_CLOSE_MINUTES:-30}
-      EXPORT_DIR: ${EXPORT_DIR:-/app/exports}
-      BACKUP_DIR: ${BACKUP_DIR:-/app/backups}
-    depends_on:
-      mariadb:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-    volumes:
-      - ./exports:/app/exports
-      - ./backups:/app/backups
-      - ./data:/app/data
-    secrets:
-      - discord_token
-    read_only: true
-    tmpfs:
-      - /tmp:size=64m,mode=1777
-    init: true
-    restart: unless-stopped
-
-  migrate:
-    build: .
-    environment:
-      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
-    depends_on:
-      mariadb:
-        condition: service_healthy
-    command: ["uma-st-2-safe-migrate"]
-    read_only: true
-    tmpfs:
-      - /tmp:size=64m,mode=1777
-    restart: "no"
-
   mariadb:
     image: mariadb:11.4.7
     environment:
-      MARIADB_DATABASE: ${MYSQL_DATABASE:?set MYSQL_DATABASE}
-      MARIADB_USER: ${MYSQL_USER:?set MYSQL_USER}
-      MARIADB_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD}
-      MARIADB_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD}
+      MARIADB_DATABASE: ${MYSQL_DATABASE:?MYSQL_DATABASE is required}
+      MARIADB_USER: ${MYSQL_USER:?MYSQL_USER is required}
+      MARIADB_PASSWORD_FILE: /run/secrets/mariadb_app_password
+      MARIADB_ROOT_PASSWORD_FILE: /run/secrets/mariadb_root_password
+    secrets:
+      - mariadb_app_password
+      - mariadb_root_password
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
       - --sql-mode=STRICT_ALL_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
-    volumes:
-      - mariadb-data:/var/lib/mysql
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
-      interval: 10s
+      interval: 5s
       timeout: 5s
-      retries: 10
-      start_period: 20s
+      retries: 30
+      start_period: 10s
     restart: unless-stopped
+    volumes:
+      - mariadb-data:/var/lib/mysql
 
-volumes:
-  mariadb-data:
+  migrate:
+    <<: *uma-st2-image
+    profiles: [runtime]
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      DATABASE_HOST: mariadb
+      DATABASE_PORT: "3306"
+      DATABASE_NAME: ${MYSQL_DATABASE:?MYSQL_DATABASE is required}
+      DATABASE_USER: ${MYSQL_USER:?MYSQL_USER is required}
+      DATABASE_PASSWORD_FILE: /run/secrets/mariadb_app_password
+    secrets:
+      - mariadb_app_password
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
+  bot:
+    <<: *uma-st2-image
+    profiles: [runtime]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_HOST: mariadb
+      DATABASE_PORT: "3306"
+      DATABASE_NAME: ${MYSQL_DATABASE:?MYSQL_DATABASE is required}
+      DATABASE_USER: ${MYSQL_USER:?MYSQL_USER is required}
+      DATABASE_PASSWORD_FILE: /run/secrets/mariadb_app_password
+      DISCORD_TOKEN_FILE: /run/secrets/discord_token
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:?DISCORD_GUILD_ID is required}
+      WIN5_DELIVERY_POLL_INTERVAL_SECONDS: ${WIN5_DELIVERY_POLL_INTERVAL_SECONDS:?WIN5_DELIVERY_POLL_INTERVAL_SECONDS is required}
+      WIN5_DELIVERY_BATCH_SIZE: ${WIN5_DELIVERY_BATCH_SIZE:?WIN5_DELIVERY_BATCH_SIZE is required}
+      WIN5_DELIVERY_MAX_ATTEMPTS: ${WIN5_DELIVERY_MAX_ATTEMPTS:?WIN5_DELIVERY_MAX_ATTEMPTS is required}
+      WIN5_DELIVERY_RETRY_DELAY_SECONDS: ${WIN5_DELIVERY_RETRY_DELAY_SECONDS:?WIN5_DELIVERY_RETRY_DELAY_SECONDS is required}
+      WIN5_DELIVERY_PENDING_TIMEOUT_SECONDS: ${WIN5_DELIVERY_PENDING_TIMEOUT_SECONDS:?WIN5_DELIVERY_PENDING_TIMEOUT_SECONDS is required}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    secrets:
+      - discord_token
+      - mariadb_app_password
+    init: true
+    restart: on-failure:5
+    stop_grace_period: 30s
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
 
 secrets:
   discord_token:
-    file: ./secrets/discord_token
+    file: ${DISCORD_TOKEN_FILE:?DISCORD_TOKEN_FILE is required}
+  mariadb_app_password:
+    file: ${MYSQL_PASSWORD_FILE:?MYSQL_PASSWORD_FILE is required}
+  mariadb_root_password:
+    file: ${MYSQL_ROOT_PASSWORD_FILE:?MYSQL_ROOT_PASSWORD_FILE is required}
+
+volumes:
+  mariadb-data:

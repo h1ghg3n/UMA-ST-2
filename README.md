@@ -1,363 +1,11 @@
 # UMA-ST-2
 
-UMA-ST-2 is a Discord-based event and data management service for Umamusume communities.
+UMA-ST-2는 우마무스메 커뮤니티의 이벤트와 운영 데이터를 관리하는 Discord 기반 서비스입니다.
 
-## Development status
+[한국어](#한국어) · [English](#english) · [日本語](#日本語)
 
-| Version | Status | Scope |
-|---|---|---|
-| V1 | MAINTENANCE | Current executable public Discord/MariaDB service |
-| V2 | ACTIVE DEVELOPMENT | Architecture and feature rewrite tracked separately |
-
-V1 remains the runnable code in this public repository and is maintained for operational fixes and compatibility. V2 is the active development line; its feature-by-feature progress and the current WIN5 vertical slice are tracked in [ROADMAP.md](ROADMAP.md).
-
-[English](#english) · [日本語](#日本語) · [한국어](#한국어)
-
-![UMA-ST-2 V1 architecture](architecture.svg)
-
----
-
-# English
-
-## Overview
-
-UMA-ST-2 is a Discord-first community service for managing Circle Match events, Circle Points,
-betting, Rating, and WIN5 competitions.
-
-The V1 service is a modular Python application backed by MariaDB and primarily deployed with
-Docker Compose. Its main components are:
-
-- a Discord bot built with `discord.py`;
-- MariaDB persistent storage;
-- SQLAlchemy transaction and persistence boundaries;
-- Alembic database migrations;
-- XLSX import and export support;
-- Docker Compose deployment.
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the technical overview. The internal V1 Python package
-remains `umacircle_bot` as a compatibility identifier; new public product and CLI identifiers use
-`UMA-ST-2` and `uma-st-2`.
-
-## Features
-
-### Account and identity management
-
-- Discord-based account registration requests
-- Persona, DiscordAccount, and GameAccount management
-- In-game account identification by PID
-- Operator approval and rejection workflows
-- Existing account and historical-record linking
-- Role-ID-based staff authorization
-
-### Circle Match
-
-- Race creation, conditions, and entry management
-- Circle Point betting and immutable odds snapshots
-- Result submission, review, correction, and confirmation
-- GameAccount-scoped Rating calculation
-- Persona-owned placement rewards
-- Atomic Rating, betting, and placement-reward settlement
-- Append-only settlement rollback and Discord publication
-
-### WIN5
-
-- Season and Round lifecycle management
-- Normal TOP1, TOP3, and TOP5 predictions
-- Special Round winner predictions
-- Cancellation and resubmission while a Round is open
-- Result entry, scoring, Season standings, and XLSX export
-
-### Circle Point and operations
-
-- Persona-owned Circle Point wallets and append-only transaction history
-- Registration grants, betting stakes and payouts, Match rewards, and WIN5 rewards
-- Staff grants and adjustments
-- Guild, channel, and role configuration
-- Migration preflight, XLSX export, and backup directory support
-
-## Requirements
-
-- Docker Engine with Docker Compose
-- A Discord application and bot token
-- A Discord server where the bot can register slash commands
-- The target Discord Guild ID and staff Role IDs
-- MariaDB credentials configured through `.env`
-
-Python 3.11 or later is required when running without Docker.
-
-## Quick start
-
-Clone the repository and create the local runtime files:
-
-```bash
-git clone https://github.com/h1ghg3n/UMA-ST-2.git
-cd UMA-ST-2
-cp .env.example .env
-mkdir -p secrets exports backups data
-```
-
-Edit `.env` and configure at least:
-
-```dotenv
-DISCORD_GUILD_ID=your-guild-id
-OWNER_ROLE_ID=your-owner-role-id
-
-MYSQL_DATABASE=uma_st2
-MYSQL_USER=uma_st2
-MYSQL_PASSWORD=replace-this-password
-MYSQL_ROOT_PASSWORD=replace-this-root-password
-
-DATABASE_URL=mysql+pymysql://uma_st2:replace-this-password@mariadb:3306/uma_st2?charset=utf8mb4
-```
-
-Create `secrets/discord_token` and place only the Discord bot token in that file. Do not put the
-token directly in `.env`, source files, Docker image layers, or command history.
-
-Start the service and inspect the bot log:
-
-```bash
-docker compose up --build -d
-docker compose logs -f bot
-```
-
-Docker Compose starts MariaDB, applies the Alembic migration, and then starts the Discord bot.
-
-## Initial Circle Match Rating rules
-
-A fresh database can start without historical replay or backfill. Before settling a Rating-enabled
-Circle Match, seed a Rating rule version from a compatible XLSX workbook containing the
-`Rate 기준표` worksheet.
-
-Place the workbook at `data/rating-rules.xlsx`, inspect it, and review the reported SHA-256:
-
-```bash
-docker compose run --rm bot \
-  uma-st-2-seed-rating-rules /app/data/rating-rules.xlsx \
-  --source-identifier initial-rating-rules
-```
-
-Apply the reviewed workbook explicitly:
-
-```bash
-docker compose run --rm bot \
-  uma-st-2-seed-rating-rules /app/data/rating-rules.xlsx \
-  --source-identifier initial-rating-rules \
-  --apply \
-  --confirm-checksum <reviewed-sha256>
-```
-
-Rating rule versions are immutable after creation.
-
-## Discord commands
-
-Common member commands:
-
-| Command | Purpose |
-|---|---|
-| `/help` | Show the main commands and registration flow |
-| `/account register` | Request GameAccount registration |
-| `/account registration-status` | Check a registration request |
-| `/account info` | View linked accounts and Circle Points |
-| `/match races` | View Circle Matches currently open for betting |
-| `/match bet` | Place a Circle Point bet |
-| `/win5 info` | View the active WIN5 Season |
-| `/win5 rounds` | View open WIN5 Rounds |
-| `/win5 submit` | Submit a normal WIN5 prediction |
-| `/win5 special-submit` | Submit a Special Round prediction |
-| `/win5 submissions` | View submissions and scores |
-| `/win5 cancel` | Cancel an open submission |
-| `/win5 standings` | View Season standings |
-
-Operator commands are organized under `/staff`, `/staff persona`, `/match staff`, `/win5 staff`,
-`/settings`, and `/export`. Export commands include `/export win5 season` and
-`/export circle-points`.
-
-Some legacy account-linking commands are disabled by default. Do not enable them without completing
-the corresponding operator review and cutover procedure.
-
-## Data, recovery, and security
-
-MariaDB is the live source of truth. The legacy import, replay, reconciliation, and rebuild commands
-included in V1 were developed for bounded historical recovery procedures; they are not a general
-public migration API.
-
-For a new installation, start with a fresh MariaDB database, let Alembic migrate it to the current
-head, configure Discord roles and channels, and seed Rating rules before the first Rating-enabled
-Circle Match. Use verified MariaDB backups for recovery.
-
-- Never commit `secrets/discord_token`.
-- Use Discord Role IDs for staff authorization.
-- Use strong MariaDB passwords and do not expose MariaDB directly to the public network.
-- Back up the MariaDB volume before operational maintenance.
-- Keep exports and backups outside the container.
-
-## Project scope
-
-This repository contains the V1 Discord and MariaDB service. Web applications, OAuth, OCR, AI/LLM
-features, and the V2 database redesign are outside the V1 scope.
-
-## License and third-party rights
-
-The UMA-ST-2 source code is provided under the [MIT License](LICENSE).
-
-Copyright © 2026 h1ghg3n.
-
-Uma Musume: Pretty Derby and related game names, trademarks, and copyrighted materials belong to
-Cygames, Inc. and their respective rights holders.
-
-© Cygames, Inc.
-
-UMA-ST-2 is an unofficial community project. It is not affiliated with, sponsored by, or endorsed
-by Cygames, Inc. or other respective rights holders. This game-related notice does not apply to the
-original source code of this project.
-
-See [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md) and
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for domain contributions and third-party license
-information.
-
----
-
-# 日本語
-
-## 概要
-
-UMA-ST-2は、ウマ娘コミュニティ向けのDiscordベースのイベント・データ管理サービスです。
-Circle Match、Circle Point、ベッティング、Rating、WIN5大会を管理できます。
-
-V1はMariaDBを使用するPython製のモジュラーアプリケーションで、主にDocker Composeで運用します。
-主な構成は`discord.py`、MariaDB、SQLAlchemy、Alembic、XLSX入出力です。
-
-技術的な構成は[ARCHITECTURE.md](ARCHITECTURE.md)を参照してください。V1の内部Python package名
-`umacircle_bot`は互換性のために維持されます。公開製品名とCLI名には`UMA-ST-2`と`uma-st-2`を使用します。
-
-## 主な機能
-
-### アカウントとIdentity管理
-
-- Discordからのアカウント登録申請
-- Persona、DiscordAccount、GameAccountの管理
-- ゲーム内PIDによるアカウント識別
-- 運営者による登録申請の承認・却下
-- 既存アカウントおよび過去記録のリンク
-- Discord Role IDによる権限管理
-
-### Circle Match
-
-- Raceの作成、条件設定、Entry管理
-- Circle Pointベッティングと変更不可のOdds snapshot
-- Resultの提出、確認、修正、確定
-- GameAccount単位のRating計算
-- Personaに対する着順報酬
-- Rating、ベッティング、着順報酬の一括精算
-- 追記方式の精算rollbackとDiscordへの結果公開
-
-### WIN5
-
-- SeasonとRoundのlifecycle管理
-- TOP1、TOP3、TOP5予想
-- Special Roundの1着予想
-- 開催中Roundの提出取消・再提出
-- Result入力、採点、Seasonランキング、XLSX出力
-
-### Circle Pointと運営機能
-
-- Persona単位のCircle Point walletと追記方式のtransaction履歴
-- 登録grant、betting stake・payout、Match報酬、WIN5報酬
-- 運営者によるgrant・adjustment
-- Guild、channel、role設定
-- Migration preflight、XLSX出力、backup directory
-
-## 必要環境と起動
-
-- Docker EngineおよびDocker Compose
-- Discord ApplicationとBot Token
-- Slash Commandを登録するDiscord Server
-- Discord Guild IDと運営Role ID
-- `.env`に設定するMariaDB認証情報
-
-Dockerを使用しない場合はPython 3.11以上が必要です。
-
-```bash
-git clone https://github.com/h1ghg3n/UMA-ST-2.git
-cd UMA-ST-2
-cp .env.example .env
-mkdir -p secrets exports backups data
-```
-
-`.env`にGuild ID、Role ID、MariaDBパスワード、`DATABASE_URL`を設定します。
-`secrets/discord_token`にはDiscord Bot Tokenだけを保存してください。Tokenを`.env`、ソースコード、
-Docker image layer、command historyに直接記録しないでください。
-
-```bash
-docker compose up --build -d
-docker compose logs -f bot
-```
-
-Docker ComposeはMariaDBを起動し、Alembic migrationを適用してからBotを起動します。
-
-## 初期Ratingルール
-
-新規Databaseの起動に過去データのreplayやbackfillは必要ありません。Ratingを使用するCircle Matchを
-精算する前に、`Rate 기준표` worksheetを含む互換XLSXからRating rule versionを登録してください。
-
-```bash
-docker compose run --rm bot \
-  uma-st-2-seed-rating-rules /app/data/rating-rules.xlsx \
-  --source-identifier initial-rating-rules
-```
-
-表示されたSHA-256を確認してから明示的に適用します。
-
-```bash
-docker compose run --rm bot \
-  uma-st-2-seed-rating-rules /app/data/rating-rules.xlsx \
-  --source-identifier initial-rating-rules \
-  --apply \
-  --confirm-checksum <reviewed-sha256>
-```
-
-作成済みのRating rule versionは変更されません。
-
-## 主なDiscord command
-
-一般メンバーは`/help`、`/account register`、`/account info`、`/match races`、`/match bet`、
-`/win5 info`、`/win5 rounds`、`/win5 submit`、`/win5 special-submit`、`/win5 submissions`、
-`/win5 cancel`、`/win5 standings`を使用できます。
-
-運営commandは`/staff`、`/staff persona`、`/match staff`、`/win5 staff`、`/settings`、`/export`に
-分かれています。XLSX出力には`/export win5 season`と`/export circle-points`を使用します。
-
-Legacy account linkは初期状態で無効です。専用の確認およびcutover手順を完了せずに有効化しないでください。
-
-## データ、復旧、セキュリティ
-
-MariaDBが稼働中データのsource of truthです。V1に含まれるlegacy import、replay、reconciliation、
-rebuild commandは特定の過去データを復旧するためのmaintenance toolであり、汎用migration APIではありません。
-
-新規環境ではfresh MariaDB、Alembic migration、Rating rule seed、検証済みMariaDB backupを使用してください。
-Bot Tokenをcommitせず、強力なDB passwordとDiscord Role IDによる権限管理を使用してください。
-
-## プロジェクト範囲
-
-このrepositoryにはV1 Discord・MariaDB serviceが含まれます。Web application、OAuth、OCR、AI/LLM機能、
-V2 database redesignはV1の範囲外です。
-
-## ライセンスと第三者の権利
-
-UMA-ST-2のソースコードは[MIT License](LICENSE)で提供されます。
-
-Copyright © 2026 h1ghg3n.
-
-『ウマ娘 プリティーダービー』および関連する名称、商標、著作物の権利は、Cygames, Inc.および
-各権利者に帰属します。
-
-© Cygames, Inc.
-
-UMA-ST-2は非公式のコミュニティプロジェクトです。Cygames, Inc.および各権利者との提携、後援、
-承認関係はありません。このゲーム関連の権利表示は、本projectが独自に作成したsource codeには適用されません。
-
-ドメイン面での協力と第三者ライセンスの詳細は[ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md)および
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)を参照してください。
+현재 공개 버전은 V2 architecture를 사용하는 `0.1.3` snapshot입니다. 기존 V1은 `v1` branch와
+`v0.1.0` tag에서 확인할 수 있습니다.
 
 ---
 
@@ -365,146 +13,228 @@ UMA-ST-2は非公式のコミュニティプロジェクトです。Cygames, Inc
 
 ## 개요
 
-UMA-ST-2는 우마무스메 커뮤니티의 이벤트와 데이터를 관리하기 위한 Discord 기반 서비스입니다.
-Circle Match, Circle Point, 베팅, Rating 및 WIN5 대회를 지원합니다.
+UMA-ST-2는 Circle Match, Circle Point, Betting, Rating과 WIN5 운영을 지원합니다. Python 3.13,
+`discord.py`, SQLAlchemy, Alembic과 MariaDB를 사용하며 Docker Compose 배포를 기본으로 합니다.
 
-V1은 MariaDB를 사용하는 Python 모듈러 애플리케이션이며 Docker Compose 배포를 기본으로 합니다.
-주요 구성 요소는 `discord.py`, MariaDB, SQLAlchemy, Alembic 및 XLSX 입출력입니다.
+V2는 다음 dependency 방향을 따르는 modular monolith입니다.
 
-상세한 기술 구조는 [ARCHITECTURE.md](ARCHITECTURE.md)를 참고하십시오. V1 내부 Python package
-`umacircle_bot`은 compatibility identifier로 유지하며, 공개 제품명과 CLI에는 `UMA-ST-2`와
-`uma-st-2`를 사용합니다.
+```text
+Discord / CLI -> Adapters -> Application -> Domain
+                               ^
+                               |
+                        Infrastructure
+                  (implements outbound ports)
+                               |
+                     MariaDB / Discord API
+```
+
+상세 구조는 [ARCHITECTURE.md](ARCHITECTURE.md)를 참고하십시오.
 
 ## 주요 기능
 
-### 계정 및 Identity 관리
+- Persona, DiscordAccount와 GameAccount를 분리한 identity 관리
+- Circle Point 잔액과 transaction 이력
+- Circle Match 생성, 조건과 Entry 설정, Betting 시작·종료
+- Odds 조회와 Discord 공지
+- Result 검토·확정, GameAccount별 Rating 계산과 Settlement
+- Settlement rollback과 후속 publication
+- WIN5 Season·Round lifecycle, 일반·특별 Round 제출과 scoring
+- Match, WIN5와 Circle Point XLSX export
+- Guild channel, role, timezone과 공지 설정
 
-- Discord 계정 등록 요청
-- Persona, DiscordAccount, GameAccount 관리
-- 인게임 PID 기반 계정 식별
-- 운영자의 등록 요청 승인 및 반려
-- 기존 계정과 과거 기록 연결
-- Discord Role ID 기반 권한 관리
+## 공개 범위
 
-### Circle Match
+이 repository는 fresh MariaDB에서 시작하는 V2 runtime과 test를 제공합니다. 특정 운영 DB를 이전하기 위한
+V1→V2 replay, protected manifest, cutover evidence와 실제 운영 데이터는 포함하지 않습니다.
 
-- Race 생성, 조건 설정 및 Entry 관리
-- Circle Point 베팅과 변경 불가능한 Odds snapshot
-- Result 제출, 검토, 정정 및 확정
-- GameAccount별 Rating 계산
-- 소유 Persona에 대한 착순 보상
-- Rating, 베팅 및 착순 보상의 원자적 정산
-- 추가 기록 방식의 정산 rollback과 Discord 결과 공개
+Web, OAuth, OCR과 AI/LLM 기능도 현재 공개 범위에 포함되지 않습니다.
 
-### WIN5
+## 요구 사항
 
-- Season 및 Round lifecycle 관리
-- 일반 TOP1, TOP3, TOP5 예측
-- Special Round 우승자 예측
-- 열린 Round의 제출 취소 및 재제출
-- Result 입력, 채점, Season 순위 및 XLSX 내보내기
-
-### Circle Point 및 운영 기능
-
-- Persona 소유 Circle Point wallet과 추가 기록 방식의 transaction 이력
-- 등록 grant, 베팅 stake·payout, Match 보상 및 WIN5 보상
-- 운영자 grant와 adjustment
-- Guild, channel 및 role 설정
-- Migration preflight, XLSX 내보내기 및 backup directory
-
-## 요구 사항과 실행 방법
-
-- Docker Engine 및 Docker Compose
+- Docker Engine과 Docker Compose
 - Discord Application과 Bot Token
-- Slash Command를 등록할 Discord 서버
-- Discord Guild ID와 운영 Role ID
-- `.env`에 설정할 MariaDB 인증정보
+- Slash Command를 등록할 Discord server
+- Discord Guild ID
+- MariaDB credential을 저장할 local secret file
 
-Docker를 사용하지 않을 경우 Python 3.11 이상이 필요합니다.
+Docker 없이 실행하려면 Python `3.13.x`가 필요합니다.
+
+## Fresh installation
+
+Repository를 clone하고 환경 파일과 secret directory를 준비하십시오.
 
 ```bash
 git clone https://github.com/h1ghg3n/UMA-ST-2.git
 cd UMA-ST-2
 cp .env.example .env
-mkdir -p secrets exports backups data
+mkdir -p secrets
 ```
 
-`.env`에서 Guild ID, 운영 Role ID, MariaDB 비밀번호 및 `DATABASE_URL`을 설정합니다.
-`secrets/discord_token` 파일에는 Discord Bot Token만 저장하십시오. Token을 `.env`, 소스 코드,
-Docker image layer 또는 command history에 직접 기록하지 마십시오.
+다음 파일에는 해당 credential 값만 저장하십시오.
+
+```text
+secrets/discord_token
+secrets/mariadb_app_password
+secrets/mariadb_root_password
+```
+
+`.env`에서 `DISCORD_GUILD_ID`와 필요한 runtime 값을 설정한 뒤 서비스를 시작하십시오.
 
 ```bash
-docker compose up --build -d
+docker compose --profile runtime up --build -d
 docker compose logs -f bot
 ```
 
-Docker Compose는 MariaDB를 시작하고 Alembic migration을 적용한 뒤 Discord Bot을 시작합니다.
+Compose는 MariaDB를 시작하고 Alembic `head`를 적용한 다음 bot을 실행합니다. Discord Token과 DB password는
+container environment 값으로 전달하지 않고 Docker secret file로 mount합니다.
 
-## 초기 Circle Match Rating 규칙
+## 초기 데이터
 
-Fresh database를 시작할 때 과거 데이터 replay나 backfill은 필요하지 않습니다. Rating을 사용하는
-Circle Match를 정산하기 전에는 `Rate 기준표` worksheet가 포함된 호환 XLSX로 Rating rule version을
-등록해야 합니다.
+Fresh schema에는 community별 account, master data와 Rating rule이 들어 있지 않습니다. 운영 전에 검토한
+master-data JSON과 Rating-rule XLSX를 별도로 준비해 등록하십시오. 실제 운영 source 파일은 이 repository에
+포함하지 않습니다.
+
+다음은 Docker Compose를 사용하는 예시입니다.
 
 ```bash
-docker compose run --rm bot \
-  uma-st-2-seed-rating-rules /app/data/rating-rules.xlsx \
+docker compose --profile runtime run --rm \
+  --volume ./master-data.reviewed.json:/tmp/master-data.reviewed.json:ro \
+  bot uma-st-2-seed-master-data \
+  --manifest /tmp/master-data.reviewed.json
+```
+
+```bash
+docker compose --profile runtime run --rm \
+  --volume ./rating-rules.xlsx:/tmp/rating-rules.xlsx:ro \
+  bot uma-st-2-seed-rating-rules \
+  --workbook /tmp/rating-rules.xlsx \
   --source-identifier initial-rating-rules
 ```
 
-출력된 SHA-256을 검토한 뒤 명시적으로 적용합니다.
+두 command는 입력을 검증한 뒤 대상 DB에 바로 반영합니다. 원본 파일과 대상 DB를 먼저 확인하고, 시험 실행은 disposable DB에서 수행하십시오. 성공 출력의 checksum과 receipt를 보관하십시오.
+
+## Branch
+
+- `main`: 현재 V2 public runtime
+- `v1`: 마지막 V1 public maintenance snapshot
+- `v0.1.0`: 최초 V1 public release
+
+## 보안
+
+Token, password, 실제 Discord ID, PID, DB dump, XLSX와 운영 manifest를 commit하지 마십시오. 공개 repository의
+예시는 실제 계정정보가 아닌 임의 값만 사용합니다.
+
+## 라이선스와 제3자 권리
+
+프로젝트가 작성한 source code는 [MIT License](LICENSE)에 따라 제공됩니다. 저작권과 domain 기여에 대한
+표기는 [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md), dependency license는
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 참고하십시오.
+
+『우마무스메 프리티 더비』와 관련 명칭, 상표 및 저작물의 권리는 Cygames, Inc.와 각 권리자에게 있습니다.
+UMA-ST-2는 비공식 community project이며 Cygames, Inc. 또는 다른 권리자와 제휴하거나 후원·승인받지
+않았습니다.
+
+---
+
+# English
+
+## Overview
+
+UMA-ST-2 is a Discord-based service for operating Umamusume community events. It supports Circle Match,
+Circle Point, betting, GameAccount-scoped Rating, and WIN5 workflows.
+
+The public snapshot uses Python 3.13, `discord.py`, SQLAlchemy, Alembic, MariaDB, and Docker Compose. Its
+dependency direction is `adapter -> application -> domain`, with concrete database and Discord integrations
+implemented by infrastructure modules. See [ARCHITECTURE.md](ARCHITECTURE.md) for the technical boundary.
+
+## Public scope
+
+This repository provides the V2 runtime, fresh Alembic schema, and public test suite. It does not include private
+V1-to-V2 replay tools, protected manifests, cutover evidence, credentials, member data, or operational workbooks.
+Web, OAuth, OCR, and AI/LLM features are not included in this snapshot.
+
+## Quick start
 
 ```bash
-docker compose run --rm bot \
-  uma-st-2-seed-rating-rules /app/data/rating-rules.xlsx \
-  --source-identifier initial-rating-rules \
-  --apply \
-  --confirm-checksum <reviewed-sha256>
+git clone https://github.com/h1ghg3n/UMA-ST-2.git
+cd UMA-ST-2
+cp .env.example .env
+mkdir -p secrets
+docker compose --profile runtime up --build -d
 ```
 
-생성된 Rating rule version은 변경되지 않습니다.
+Store only the corresponding secret value in each of these files:
 
-## 주요 Discord command
+```text
+secrets/discord_token
+secrets/mariadb_app_password
+secrets/mariadb_root_password
+```
 
-일반 사용자는 `/help`, `/account register`, `/account registration-status`, `/account info`,
-`/match races`, `/match bet`, `/win5 info`, `/win5 rounds`, `/win5 submit`, `/win5 special-submit`,
-`/win5 submissions`, `/win5 cancel`, `/win5 standings`를 사용할 수 있습니다.
+Set `DISCORD_GUILD_ID` and the required runtime values in `.env`. A fresh database also requires reviewed master
+data and Rating rules before normal Match operation.
 
-운영 command는 `/staff`, `/staff persona`, `/match staff`, `/win5 staff`, `/settings`, `/export`로
-구분됩니다. XLSX 내보내기에는 `/export win5 season`과 `/export circle-points`를 사용합니다.
+## Branches
 
-Legacy account-link 기능은 기본적으로 비활성화되어 있습니다. 해당 운영 검수 및 cutover 절차를
-완료하지 않고 활성화해서는 안 됩니다.
+- `main`: current V2 public runtime
+- `v1`: final V1 public maintenance snapshot
+- `v0.1.0`: initial V1 public release
 
-## 데이터, 복구 및 보안
+## License and third-party rights
 
-MariaDB가 실제 운영 데이터의 source of truth입니다. V1에 포함된 legacy import, replay,
-reconciliation 및 rebuild command는 특정 과거 데이터 복구용 maintenance tool이며 범용 migration
-API가 아닙니다.
+Project-owned source code is provided under the [MIT License](LICENSE). See
+[ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for authorship,
+domain contributions, and dependency licenses.
 
-신규 설치에서는 fresh MariaDB, Alembic migration, Rating rule seed와 검증된 MariaDB backup을
-사용하십시오. Bot Token을 commit하지 말고, 강력한 DB password와 Discord Role ID 기반 권한 관리를
-적용하십시오.
+Umamusume-related names, trademarks, and copyrighted materials belong to Cygames, Inc. and their respective
+rights holders. UMA-ST-2 is an unofficial community project and is not affiliated with, sponsored by, or endorsed
+by Cygames, Inc. or other rights holders.
 
-## 프로젝트 범위
+---
 
-이 repository에는 V1 Discord 및 MariaDB service가 포함됩니다. Web application, OAuth, OCR,
-AI/LLM 기능과 V2 database redesign은 V1 범위에 포함되지 않습니다.
+# 日本語
 
-## 라이선스 및 제3자 권리
+## 概要
 
-UMA-ST-2의 소스 코드는 [MIT License](LICENSE)로 배포됩니다.
+UMA-ST-2は、ウマ娘コミュニティのイベント運営を支援するDiscordベースのサービスです。Circle Match、
+Circle Point、Betting、GameAccount単位のRating、WIN5を扱います。
 
-Copyright © 2026 h1ghg3n.
+公開snapshotはPython 3.13、`discord.py`、SQLAlchemy、Alembic、MariaDB、Docker Composeを使用します。
+依存方向は`adapter -> application -> domain`です。技術的な境界は
+[ARCHITECTURE.md](ARCHITECTURE.md)を参照してください。
 
-『우마무스메 프리티 더비』 및 관련 게임 명칭, 상표와 저작물의 권리는 Cygames, Inc. 및 각 권리자에게
-있습니다.
+## 公開範囲
 
-© Cygames, Inc.
+このrepositoryにはV2 runtime、fresh Alembic schema、公開testを含めています。非公開のV1→V2 replay、
+protected manifest、cutover evidence、credential、メンバー情報、運営用workbookは含めていません。
+Web、OAuth、OCR、AI/LLM機能も現在の公開範囲外です。
 
-UMA-ST-2는 비공식 커뮤니티 프로젝트입니다. Cygames, Inc. 또는 다른 권리자와 제휴하거나 후원·승인받은
-프로젝트가 아닙니다. 이 게임 관련 권리 고지는 프로젝트가 독자적으로 작성한 source code에는 적용되지
-않습니다.
+## 起動
 
-도메인 기여와 제3자 라이선스에 대한 자세한 내용은 [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md)와
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 참고하십시오.
+```bash
+git clone https://github.com/h1ghg3n/UMA-ST-2.git
+cd UMA-ST-2
+cp .env.example .env
+mkdir -p secrets
+docker compose --profile runtime up --build -d
+```
+
+`secrets/discord_token`、`secrets/mariadb_app_password`、`secrets/mariadb_root_password`には、対応する
+credential値だけを保存してください。`.env`には`DISCORD_GUILD_ID`と必要なruntime設定を記入します。
+Fresh databaseでMatchを運用する前に、確認済みのmaster dataとRating ruleを別途登録してください。
+
+## Branch
+
+- `main`: 現在のV2 public runtime
+- `v1`: 最終V1 public maintenance snapshot
+- `v0.1.0`: 最初のV1 public release
+
+## Licenseと第三者の権利
+
+プロジェクトが作成したsource codeは[MIT License](LICENSE)で提供します。著作者、domain contribution、
+dependency licenseは[ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md)と
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)を参照してください。
+
+『ウマ娘 プリティーダービー』に関連する名称、商標、著作物の権利は、Cygames, Inc.および各権利者に
+帰属します。UMA-ST-2は非公式のcommunity projectであり、Cygames, Inc.または各権利者との提携、後援、
+承認関係はありません。
