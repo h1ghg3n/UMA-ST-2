@@ -4,7 +4,8 @@ UMA-ST-2는 우마무스메 커뮤니티의 이벤트와 운영 데이터를 관
 
 [한국어](#한국어) · [English](#english) · [日本語](#日本語)
 
-현재 공개 버전은 V2 architecture를 사용하는 `0.1.3` snapshot입니다. 기존 V1은 `v1` branch와
+현재 공개 버전은 V2 architecture를 사용하는 `v2.0.0 Beta 1`입니다. Python package version은
+`2.0.0b1`입니다. 기존 V1은 `v1` branch와
 `v0.1.0` tag에서 확인할 수 있습니다.
 
 ---
@@ -140,6 +141,8 @@ UMA-ST-2는 비공식 community project이며 Cygames, Inc. 또는 다른 권리
 
 ## Overview
 
+The current public release is `v2.0.0 Beta 1`, with Python package version `2.0.0b1`.
+
 UMA-ST-2 is a Discord-based service for operating Umamusume community events. It supports Circle Match,
 Circle Point, betting, GameAccount-scoped Rating, and WIN5 workflows.
 
@@ -195,6 +198,8 @@ by Cygames, Inc. or other rights holders.
 # 日本語
 
 ## 概要
+
+現在の公開バージョンは`v2.0.0 Beta 1`です。Python package versionは`2.0.0b1`です。
 
 UMA-ST-2は、ウマ娘コミュニティのイベント運営を支援するDiscordベースのサービスです。Circle Match、
 Circle Point、Betting、GameAccount単位のRating、WIN5を扱います。
