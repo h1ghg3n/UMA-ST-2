@@ -241,6 +241,21 @@ def test_complete_entry_replacement_query_audit_exact_retry_and_stale(
         )
         assert [row.accounts[0].id for row in candidate_draft.rows] == list(seeded.account_ids)
         assert seeded.variant_id in {item.umamusume_variant_id for item in candidate_draft.characters}
+        partial_candidates = queries.prepare_candidates(
+            match_id=seeded.match_id,
+            lines=(
+                MatchEntrySearchLine(f"Account 1 {suffix}"),
+                MatchEntrySearchLine(f"missing {suffix}"),
+                MatchEntrySearchLine(f"Account 2 {suffix}"),
+            ),
+        )
+        assert [row.entry_number for row in partial_candidates.rows] == [1, 2, 3]
+        assert [tuple(item.id for item in row.accounts) for row in partial_candidates.rows] == [
+            (seeded.account_ids[0],),
+            (),
+            (seeded.account_ids[1],),
+        ]
+        assert queries.get_target(match_id=seeded.match_id).entries == ()
         initial_draft = queries.prepare_replacement(
             match_id=seeded.match_id,
             selections=(
@@ -262,6 +277,14 @@ def test_complete_entry_replacement_query_audit_exact_retry_and_stale(
         assert commands.replace_entries(initial_request) == initial
         assert [entry.entry_number for entry in initial.snapshot.entries] == [1, 2]
         assert initial.snapshot.entries[1].umamusume_variant_id == seeded.variant_id
+
+        editor = queries.prepare_editor(match_id=seeded.match_id)
+        assert editor.current == initial.snapshot
+        assert [row.accounts[0].id for row in editor.rows] == list(seeded.account_ids)
+        assert editor.current.entries[1].umamusume_variant_id == seeded.variant_id
+        target = next(item for item in queries.search_targets(search=suffix) if item.match_id == seeded.match_id)
+        assert target.current_entry_count == 2
+        assert target.scheduled_at.tzinfo is not None
 
         replacement_draft = queries.prepare_replacement(
             match_id=seeded.match_id,
@@ -369,5 +392,8 @@ def test_complete_entry_replacement_preserves_two_characters_for_one_game_accoun
         ]
         assert [entry.umamusume_id for entry in result.snapshot.entries] == list(seeded.umamusume_ids)
         assert result.snapshot.entries[1].umamusume_variant_id == seeded.variant_id
+        editor = queries.prepare_editor(match_id=seeded.match_id)
+        assert [row.accounts[0].id for row in editor.rows] == [seeded.account_ids[0], seeded.account_ids[0]]
+        assert editor.current == result.snapshot
     finally:
         _cleanup(migrated_engine, seeded)

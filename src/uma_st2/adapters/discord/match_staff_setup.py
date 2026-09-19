@@ -6,7 +6,6 @@ import logging
 from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
-from typing import Protocol
 
 import discord
 
@@ -205,20 +204,6 @@ class MatchConditionSelection:
         )
 
 
-class MatchEntryEditorHandler(Protocol):
-    """Existing complete-roster editor surface nested in the setup workflow."""
-
-    async def start_replacement(
-        self,
-        interaction: discord.Interaction,
-        *,
-        context: MatchStaffInteractionContext,
-        match_id: int,
-        reason: str | None,
-        source_view: discord.ui.LayoutView,
-    ) -> None: ...
-
-
 class MatchSetupMainButton(discord.ui.Button[discord.ui.LayoutView]):
     def __init__(
         self,
@@ -280,16 +265,6 @@ class MatchSetupEditorView(discord.ui.LayoutView):
                     label=label,
                 )
             )
-        editor_actions.add_item(
-            MatchSetupMainButton(
-                adapter=adapter,
-                context=context,
-                draft=draft,
-                action="entries",
-                label=copy.SETUP_ENTRY_LABEL,
-                disabled=draft.mode != MatchSetupMode.EDIT,
-            )
-        )
         final_actions = discord.ui.ActionRow()
         final_actions.add_item(
             MatchSetupMainButton(
@@ -959,7 +934,6 @@ class MatchSetupDiscordAdapter:
     setup_queries: MatchStaffSetupQueries
     creation_commands: MatchCreationCommands
     setup_commands: MatchSetupCommands
-    entry_adapter: MatchEntryEditorHandler
     authorize_interaction: AuthorizeDiscordInteraction
     blocking_runner: BlockingApplicationRunner = run_blocking_application
 
@@ -1083,20 +1057,6 @@ class MatchSetupDiscordAdapter:
         action: str,
         source_view: discord.ui.LayoutView | None,
     ) -> None:
-        if action == "entries":
-            if draft.target is None or source_view is None:
-                if not await self._authorize_bound(interaction, context=context):
-                    return
-                await self.send_component_error(interaction, copy.SETUP_UNAVAILABLE)
-                return
-            await self.entry_adapter.start_replacement(
-                interaction,
-                context=context,
-                match_id=draft.target.setup.match_id,
-                reason=None,
-                source_view=source_view,
-            )
-            return
         if not await self._prepare_bound_update(
             interaction,
             context=context,

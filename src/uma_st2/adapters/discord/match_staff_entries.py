@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field, replace
+from typing import Protocol
 
 import discord
 from discord import app_commands
@@ -36,6 +37,8 @@ from .common import (
 )
 from .match_staff import MatchStaffInteractionContext
 from .strings.match_staff_entries import (
+    ACCOUNT_SEARCH_LABEL,
+    BACK_LABEL,
     BOUND_CONFIRM_ERROR,
     BOUND_INTERACTION_ERROR,
     BOUND_SUBMIT_ERROR,
@@ -57,11 +60,14 @@ from .strings.match_staff_entries import (
     MODAL_PLACEHOLDER,
     MODAL_TITLE,
     NEXT_LABEL,
+    NO_MATCHING_ACCOUNT,
     PREVIOUS_LABEL,
     REASON_TOO_LONG,
     REENTRY_LABEL,
     REOPEN_ENTRY,
     REVIEW_REQUIRED,
+    SEARCH_CORRECTION_LABEL,
+    SEARCH_CORRECTION_TITLE,
     STALE,
     UNAVAILABLE,
     entry_line_invalid_error,
@@ -87,6 +93,18 @@ _COMMAND_NAME = "match.staff.race-entries-set"
 _COMPONENT_TIMEOUT_SECONDS = 600.0
 _PREVIEW_PAGE_SIZE = 8
 _CHARACTER_PAGE_SIZE = 25
+
+
+class ReturnToMatchRacePanel(Protocol):
+    """Adapter-local callback to the existing race workflow navigation."""
+
+    async def __call__(
+        self,
+        interaction: discord.Interaction,
+        *,
+        context: MatchStaffInteractionContext,
+        source_view: discord.ui.LayoutView,
+    ) -> None: ...
 
 
 def _required_snowflake(value: object, *, field_name: str) -> int:
@@ -123,6 +141,8 @@ class MatchEntryCandidateSelectionDraft:
     character_identities: tuple[tuple[int, int | None] | None, ...] = ()
     page: int = 0
     character_page: int = 0
+    original_account_id: int | None = None
+    original_character_identity: tuple[int, int | None] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.candidates, MatchEntryCandidateDraft):
@@ -159,14 +179,14 @@ class MatchEntryCandidateSelectionDraft:
     def search_lines(self) -> tuple[MatchEntrySearchLine, ...]:
         return tuple(row.search for row in self.candidates.rows)
 
-    def with_account(self, account_id: int) -> MatchEntryCandidateSelectionDraft:
+    def with_account(self, account_id: int | None) -> MatchEntryCandidateSelectionDraft:
         updated = list(self.account_ids)
         updated[self.page] = account_id
         return replace(self, account_ids=tuple(updated))
 
     def with_character(
         self,
-        identity: tuple[int, int | None],
+        identity: tuple[int, int | None] | None,
     ) -> MatchEntryCandidateSelectionDraft:
         updated = list(self.character_identities)
         updated[self.page] = identity
@@ -181,7 +201,13 @@ class MatchEntryCandidateSelectionDraft:
                 for index, item in enumerate(self.candidates.characters)
                 if item.identity == selected
             )
-        return replace(self, page=page, character_page=character_page)
+        return replace(
+            self,
+            page=page,
+            character_page=character_page,
+            original_account_id=self.account_ids[page],
+            original_character_identity=self.character_identities[page],
+        )
 
     def with_character_page(self, page: int) -> MatchEntryCandidateSelectionDraft:
         return replace(self, character_page=page)
@@ -324,7 +350,7 @@ class MatchEntryInputView(discord.ui.LayoutView):
                 source_view=self,
             )
         )
-        actions.add_item(MatchEntryCancelButton(adapter=adapter, context=context, source_view=self))
+        actions.add_item(MatchEntryReturnButton(adapter=adapter, context=context, source_view=self))
         container.add_item(actions)
         self.add_item(container)
 
@@ -364,6 +390,43 @@ class MatchEntryReplacementModal(discord.ui.Modal):
             context=self._context,
             target=self._target,
             raw_entries=str(self.entries.value),
+            reason=self._reason,
+            source_view=self._source_view,
+        )
+
+
+class MatchEntrySearchCorrectionModal(discord.ui.Modal):
+    """Correct only one unmatched search line in the detached roster draft."""
+
+    def __init__(
+        self,
+        *,
+        adapter: MatchEntryDiscordAdapter,
+        context: MatchStaffInteractionContext,
+        draft: MatchEntryCandidateSelectionDraft,
+        reason: str | None,
+        source_view: discord.ui.LayoutView,
+    ) -> None:
+        super().__init__(title=f"{draft.page + 1}번 {SEARCH_CORRECTION_TITLE}", timeout=_COMPONENT_TIMEOUT_SECONDS)
+        self._adapter = adapter
+        self._context = context
+        self._draft = draft
+        self._reason = reason
+        self._source_view = source_view
+        self.account_chunk = discord.ui.TextInput(
+            label=SEARCH_CORRECTION_LABEL,
+            min_length=1,
+            max_length=100,
+            default=draft.search_lines[draft.page].account_chunk,
+        )
+        self.add_item(self.account_chunk)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await self._adapter.correct_candidate_search(
+            interaction,
+            context=self._context,
+            draft=self._draft,
+            raw_chunk=str(self.account_chunk.value),
             reason=self._reason,
             source_view=self._source_view,
         )
@@ -484,9 +547,15 @@ class MatchEntryCandidateEntryButton(discord.ui.Button):
             )
         )
         super().__init__(
-            label=f"{row.entry_number}. {status}"[:80],
+            label=(
+                f"{row.entry_number}. {status}"
+                if row.accounts
+                else f"{row.entry_number}번 엔트리 : {NO_MATCHING_ACCOUNT}"
+            )[:80],
             style=(
-                discord.ButtonStyle.success
+                discord.ButtonStyle.danger
+                if not row.accounts
+                else discord.ButtonStyle.success
                 if account is not None and character is not None
                 else discord.ButtonStyle.primary
             ),
@@ -542,7 +611,9 @@ class MatchEntryCandidateCharacterPageButton(discord.ui.Button):
         )
 
 
-class MatchEntryCandidateBackButton(discord.ui.Button):
+class MatchEntrySearchCorrectionButton(discord.ui.Button):
+    """Reuse the single-line Modal when changing a saved Entry's account."""
+
     def __init__(
         self,
         *,
@@ -558,16 +629,50 @@ class MatchEntryCandidateBackButton(discord.ui.Button):
         self._reason = reason
         self._source_view = source_view
         super().__init__(
-            label=CANDIDATE_SELECT_LABEL,
-            style=discord.ButtonStyle.secondary,
-            custom_id="match-entry-candidate-back",
+            label=ACCOUNT_SEARCH_LABEL, style=discord.ButtonStyle.secondary, custom_id="match-entry-search-correction"
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        await self._adapter.show_candidate_roster(
+        await self._adapter.open_search_correction_modal(
             interaction,
             context=self._context,
             draft=self._draft,
+            reason=self._reason,
+            source_view=self._source_view,
+        )
+
+
+class MatchEntryCandidateBackButton(discord.ui.Button):
+    def __init__(
+        self,
+        *,
+        adapter: MatchEntryDiscordAdapter,
+        context: MatchStaffInteractionContext,
+        draft: MatchEntryCandidateSelectionDraft,
+        reason: str | None,
+        source_view: MatchEntryCandidateDetailView,
+        cancel: bool = False,
+    ) -> None:
+        self._adapter = adapter
+        self._context = context
+        self._draft = draft
+        self._reason = reason
+        self._source_view = source_view
+        self._cancel = cancel
+        super().__init__(
+            label=CANCEL_LABEL if cancel else CANDIDATE_SELECT_LABEL,
+            style=discord.ButtonStyle.secondary if cancel else discord.ButtonStyle.success,
+            custom_id="match-entry-candidate-detail-cancel" if cancel else "match-entry-candidate-back",
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        draft = self._draft
+        if self._cancel:
+            draft = draft.with_account(draft.original_account_id).with_character(draft.original_character_identity)
+        await self._adapter.show_candidate_roster(
+            interaction,
+            context=self._context,
+            draft=draft,
             reason=self._reason,
             source_view=self._source_view,
         )
@@ -693,7 +798,7 @@ class MatchEntryCandidateView(discord.ui.LayoutView):
                 source_view=self,
             )
         )
-        actions.add_item(MatchEntryCancelButton(adapter=adapter, context=context, source_view=self))
+        actions.add_item(MatchEntryReturnButton(adapter=adapter, context=context, source_view=self))
         container.add_item(actions)
         self.add_item(container)
 
@@ -770,6 +875,15 @@ class MatchEntryCandidateDetailView(discord.ui.LayoutView):
             )
         )
         actions.add_item(
+            MatchEntrySearchCorrectionButton(
+                adapter=adapter,
+                context=context,
+                draft=draft,
+                reason=reason,
+                source_view=self,
+            )
+        )
+        actions.add_item(
             MatchEntryCandidateBackButton(
                 adapter=adapter,
                 context=context,
@@ -778,7 +892,16 @@ class MatchEntryCandidateDetailView(discord.ui.LayoutView):
                 source_view=self,
             )
         )
-        actions.add_item(MatchEntryCancelButton(adapter=adapter, context=context, source_view=self))
+        actions.add_item(
+            MatchEntryCandidateBackButton(
+                adapter=adapter,
+                context=context,
+                draft=draft,
+                reason=reason,
+                source_view=self,
+                cancel=True,
+            )
+        )
         container.add_item(account_row)
         container.add_item(character_row)
         container.add_item(actions)
@@ -871,6 +994,29 @@ class MatchEntryConfirmButton(discord.ui.Button):
             interaction,
             context=self._context,
             preview=self._preview,
+            source_view=self._source_view,
+        )
+
+
+class MatchEntryReturnButton(discord.ui.Button):
+    """Discard the local editor and return to a freshly composed race panel."""
+
+    def __init__(
+        self,
+        *,
+        adapter: MatchEntryDiscordAdapter,
+        context: MatchStaffInteractionContext,
+        source_view: discord.ui.LayoutView,
+    ) -> None:
+        self._adapter = adapter
+        self._context = context
+        self._source_view = source_view
+        super().__init__(label=BACK_LABEL, style=discord.ButtonStyle.secondary, custom_id="match-entry-race-back")
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await self._adapter.return_to_race_panel(
+            interaction,
+            context=self._context,
             source_view=self._source_view,
         )
 
@@ -983,6 +1129,7 @@ class MatchEntryDiscordAdapter:
     commands: MatchEntryCommands
     authorize_autocomplete: AuthorizeDiscordAutocomplete
     authorize_interaction: AuthorizeDiscordInteraction
+    return_to_race_panel: ReturnToMatchRacePanel
     blocking_runner: BlockingApplicationRunner = run_blocking_application
 
     async def autocomplete_targets(
@@ -1019,18 +1166,33 @@ class MatchEntryDiscordAdapter:
         ):
             return
         try:
-            target = await self.blocking_runner(lambda: self.queries.get_target(match_id=match_id))
+            prepared = await self.blocking_runner(lambda: self.queries.prepare_editor(match_id=match_id))
             normalized_reason = reason.strip() if isinstance(reason, str) else reason
             if normalized_reason == "":
                 normalized_reason = None
             if normalized_reason is not None and len(normalized_reason) > 255:
                 raise ValueError(REASON_TOO_LONG)
-            view = MatchEntryInputView(
-                adapter=self,
-                context=context,
-                target=target,
-                reason=normalized_reason,
-            )
+            if isinstance(prepared, MatchEntryCandidateDraft):
+                draft = MatchEntryCandidateSelectionDraft(
+                    candidates=prepared,
+                    account_ids=tuple(entry.game_account_id for entry in prepared.current.entries),
+                    character_identities=tuple(
+                        (entry.umamusume_id, entry.umamusume_variant_id) for entry in prepared.current.entries
+                    ),
+                )
+                view: discord.ui.LayoutView = MatchEntryCandidateView(
+                    adapter=self,
+                    context=context,
+                    draft=draft,
+                    reason=normalized_reason,
+                )
+            else:
+                view = MatchEntryInputView(
+                    adapter=self,
+                    context=context,
+                    target=prepared,
+                    reason=normalized_reason,
+                )
             source_view.stop()
             await self._edit_layout(
                 interaction,
@@ -1249,6 +1411,15 @@ class MatchEntryDiscordAdapter:
     ) -> None:
         try:
             updated = draft.viewed(entry_index)
+            if not updated.candidates.rows[entry_index].accounts:
+                await self.open_search_correction_modal(
+                    interaction,
+                    context=context,
+                    draft=updated,
+                    reason=reason,
+                    source_view=source_view,
+                )
+                return
             view = MatchEntryCandidateDetailView(
                 adapter=self,
                 context=context,
@@ -1270,6 +1441,80 @@ class MatchEntryDiscordAdapter:
             view=view,
             response_kind="entry-candidate-open",
         )
+
+    async def open_search_correction_modal(
+        self,
+        interaction: discord.Interaction,
+        *,
+        context: MatchStaffInteractionContext,
+        draft: MatchEntryCandidateSelectionDraft,
+        reason: str | None,
+        source_view: discord.ui.LayoutView,
+    ) -> None:
+        if not await self._authorize_bound(interaction, context=context):
+            return
+        if source_view.is_finished():
+            await self._send_component_error(interaction, REOPEN_ENTRY)
+            return
+        try:
+            await interaction.response.send_modal(
+                MatchEntrySearchCorrectionModal(
+                    adapter=self, context=context, draft=draft, reason=reason, source_view=source_view
+                )
+            )
+        except Exception as error:
+            self._log_delivery_failure(interaction, "entry-search-correction-modal", error=error)
+
+    async def correct_candidate_search(
+        self,
+        interaction: discord.Interaction,
+        *,
+        context: MatchStaffInteractionContext,
+        draft: MatchEntryCandidateSelectionDraft,
+        raw_chunk: str,
+        reason: str | None,
+        source_view: discord.ui.LayoutView,
+    ) -> None:
+        if not await self._prepare_bound_update(
+            interaction,
+            context=context,
+            response_kind="entry-search-correction",
+        ):
+            return
+        if source_view.is_finished():
+            await self._send_component_error(interaction, REOPEN_ENTRY)
+            return
+        try:
+            lines = list(draft.search_lines)
+            lines[draft.page] = MatchEntrySearchLine(raw_chunk)
+            candidates = await self.blocking_runner(
+                lambda: self.queries.prepare_candidates(match_id=draft.candidates.current.match_id, lines=tuple(lines))
+            )
+            updated = MatchEntryCandidateSelectionDraft(
+                candidates=candidates,
+                account_ids=tuple(
+                    selected if index != draft.page and selected in {item.id for item in row.accounts} else None
+                    for index, (row, selected) in enumerate(zip(candidates.rows, draft.account_ids, strict=True))
+                ),
+                character_identities=tuple(
+                    selected if selected in {item.identity for item in candidates.characters} else None
+                    for index, selected in enumerate(draft.character_identities)
+                ),
+            )
+            view = MatchEntryCandidateView(adapter=self, context=context, draft=updated, reason=reason)
+        except (MatchStaffEntryQueryError, TypeError, ValueError) as error:
+            await self._send_component_error(interaction, input_notice(error))
+            return
+        except Exception:
+            self._log_application_failure(interaction)
+            await self._send_component_error(interaction, input_internal_error(correlation_id(interaction)))
+            return
+        if source_view.is_finished():
+            view.stop()
+            await self._send_component_error(interaction, REOPEN_ENTRY)
+            return
+        source_view.stop()
+        await self._edit_layout(interaction, view=view, response_kind="entry-search-correction")
 
     async def show_candidate_character_page(
         self,

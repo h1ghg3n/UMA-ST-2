@@ -27,7 +27,8 @@ PANEL_GUIDANCE = "실행할 작업을 선택해 주세요. 선택 이후에도 �
 
 RACE_ACTIONS = (
     ("create", "새 경기 생성", "환경 조건까지 포함한 새 룸매치 설정을 준비합니다."),
-    ("edit", "기존 경기 수정", "베팅 시작 전 경기 설정 또는 Entry를 수정합니다."),
+    ("edit", "경기 정보 수정", "베팅 시작 전 이름·일정·코스·환경을 수정합니다."),
+    ("entries", "엔트리 입력/수정", "경기를 선택해 출전자와 우마무스메를 입력하거나 수정합니다."),
     ("open", "베팅 시작", "현재 경기 정보를 검토한 뒤 베팅을 시작합니다."),
     ("close", "베팅 마감", "현재 active pool을 기준으로 베팅을 마감합니다."),
     ("cancel", "경기 전체 취소", "필요한 active Bet 환불과 함께 경기를 종료합니다."),
@@ -75,7 +76,6 @@ SETUP_TITLE_EDIT = "룸매치 설정 수정"
 SETUP_BASIC_LABEL = "기본 정보 편집"
 SETUP_COURSE_LABEL = "코스 편집"
 SETUP_CONDITION_LABEL = "환경 조건 편집"
-SETUP_ENTRY_LABEL = "Entry 편집"
 SETUP_SAVE_LABEL = "최종 저장"
 SETUP_CANCEL_LABEL = "취소"
 SETUP_BACK_LABEL = "뒤로"

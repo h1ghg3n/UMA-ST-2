@@ -305,7 +305,6 @@ def _adapter() -> tuple[
             setup_queries=setup_queries,  # type: ignore[arg-type]
             creation_commands=commands,  # type: ignore[arg-type]
             setup_commands=commands,  # type: ignore[arg-type]
-            entry_adapter=entries,
             authorize_interaction=authorization,
             blocking_runner=_inline,  # type: ignore[arg-type]
         ),
@@ -539,17 +538,15 @@ def test_basic_choice_replacement_keeps_new_view_registered() -> None:
     asyncio.run(scenario())
 
 
-def test_condition_selection_and_entry_handoff_change_no_canonical_setup() -> None:
+def test_setup_editor_does_not_nest_entry_editing_or_change_canonical_setup() -> None:
     adapter, _, _, commands, entries, _, _ = _adapter()
     context = MatchStaffInteractionContext(user_id=123, guild_id=987, channel_id=654)
     draft = _complete_edit_draft()
     source = MatchSetupEditorView(adapter=adapter, context=context, draft=draft)
-    interaction = RecordingInteraction()
 
-    asyncio.run(_button(source, "Entry 편집").callback(interaction))  # type: ignore[arg-type]
-
-    assert entries.calls == [(71, None)]
-    assert entries.source_views == [source]
+    assert all(item.label != "Entry 편집" for item in source.walk_children() if isinstance(item, discord.ui.Button))
+    assert entries.calls == []
+    assert entries.source_views == []
     assert not source.is_finished()
     assert commands.creation_calls == commands.setup_calls == []
 

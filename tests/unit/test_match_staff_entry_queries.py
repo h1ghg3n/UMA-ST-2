@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from types import TracebackType
 
 import pytest
@@ -14,13 +15,14 @@ from uma_st2.application.match import (
     MatchEntryRosterSnapshot,
     MatchEntrySearchLine,
     MatchEntrySelection,
+    MatchEntrySnapshot,
     MatchEntryTargetChoice,
     MatchStaffEntryLookupError,
     MatchStaffEntryQueries,
     MatchStaffEntryUnavailableError,
 )
 from uma_st2.domain.identity import GameRegion
-from uma_st2.domain.match import MATCH_ENTRY_MAXIMUM_COUNT, MatchSourceKind, MatchStatus
+from uma_st2.domain.match import MATCH_ENTRY_MAXIMUM_COUNT, MatchGrade, MatchSourceKind, MatchStatus
 
 
 def _target(
@@ -53,7 +55,11 @@ class RecordingRepository:
 
     def search_targets(self, *, search: str, limit: int) -> tuple[MatchEntryTargetChoice, ...]:
         self.search_calls.append((search, limit))
-        return (MatchEntryTargetChoice(71, "제12회 정기전", MatchStatus.SCHEDULED, 0),)
+        return (
+            MatchEntryTargetChoice(
+                71, "제12회 정기전", MatchStatus.SCHEDULED, 0, MatchGrade.G3, datetime(2026, 9, 1, tzinfo=UTC)
+            ),
+        )
 
     def get_target(self, *, match_id: int) -> MatchEntryRosterSnapshot | None:
         return self.target
@@ -121,6 +127,46 @@ def test_prepare_candidates_returns_bounded_rows_without_automatic_selection() -
     assert repository.character_list_calls == 1
 
 
+def test_empty_editor_starts_input_without_account_or_character_lookup() -> None:
+    repository = RecordingRepository()
+    repository.characters = ()
+
+    assert _queries(repository).prepare_editor(match_id=71) == repository.target
+    assert repository.account_candidate_calls == []
+    assert repository.character_list_calls == 0
+
+
+def test_saved_editor_resolves_ids_not_names_and_preserves_variant_and_repeated_account() -> None:
+    repository = RecordingRepository()
+    account = repository.accounts[0]
+    entries = tuple(
+        MatchEntrySnapshot(
+            entry_id=number,
+            entry_number=number,
+            game_account_id=account.id,
+            owner_at_event_persona_id=account.persona_id,
+            affiliation_at_event=None,
+            game_region=account.game_region,
+            game_account_name="old account name",
+            umamusume_id=character.umamusume_id,
+            umamusume_variant_id=character.umamusume_variant_id,
+            umamusume_name=character.display_name,
+            created_at=datetime(2026, 9, 1, tzinfo=UTC),
+        )
+        for number, character in enumerate(repository.characters, start=1)
+    )
+    repository.target = replace(_target(), entries=entries, roster_fingerprint="")
+
+    draft = _queries(repository).prepare_editor(match_id=71)
+
+    assert draft.current == repository.target
+    assert [row.accounts for row in draft.rows] == [(account,), (account,)]
+    assert [row.search.account_chunk for row in draft.rows] == [account.nickname, account.nickname]
+    assert draft.current.entries[1].umamusume_variant_id == 41
+    assert repository.account_candidate_calls == []
+    assert repository.character_list_calls == 1
+
+
 def test_prepare_replacement_resolves_explicit_pid_free_selections() -> None:
     repository = RecordingRepository()
 
@@ -151,15 +197,32 @@ def test_prepare_replacement_preserves_multiple_characters_for_one_game_account(
     assert [entry.reference.game_account_id for entry in draft.desired_entries] == [11, 11]
 
 
-def test_missing_candidate_or_stale_selected_row_fails_without_partial_draft() -> None:
+def test_missing_candidate_remains_editable_but_stale_selection_still_fails() -> None:
     repository = RecordingRepository()
     repository.accounts = ()
     queries = _queries(repository)
 
-    with pytest.raises(MatchStaffEntryLookupError, match="GameAccount chunk"):
-        queries.prepare_candidates(match_id=71, lines=(MatchEntrySearchLine("없음"),))
+    draft = queries.prepare_candidates(match_id=71, lines=(MatchEntrySearchLine("없음"),))
+    assert draft.rows[0].accounts == ()
+    assert draft.rows[0].search.account_chunk == "없음"
     with pytest.raises(MatchStaffEntryLookupError, match="selected GameAccount"):
         queries.prepare_replacement(match_id=71, selections=(MatchEntrySelection(999, 31),))
+
+
+def test_unmatched_row_does_not_drop_or_renumber_other_candidates() -> None:
+    class PartialRepository(RecordingRepository):
+        def search_game_accounts(self, *, chunk: str, limit: int) -> tuple[MatchEntryAccountTarget, ...]:
+            candidates = super().search_game_accounts(chunk=chunk, limit=limit)
+            return () if chunk == "missing" else candidates
+
+    repository = PartialRepository()
+    lines = tuple(MatchEntrySearchLine(chunk) for chunk in ("first", "missing", "last"))
+    draft = _queries(repository).prepare_candidates(match_id=71, lines=lines)
+
+    assert [row.entry_number for row in draft.rows] == [1, 2, 3]
+    assert [row.search for row in draft.rows] == list(lines)
+    assert [row.accounts for row in draft.rows] == [repository.accounts, (), repository.accounts]
+    assert repository.account_candidate_calls == [("first", 25), ("missing", 25), ("last", 25)]
 
 
 def test_missing_canonical_umamusume_fails_before_account_candidate_search() -> None:

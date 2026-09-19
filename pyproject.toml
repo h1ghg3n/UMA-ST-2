@@ -1,6 +1,6 @@
 [project]
 name = "uma-st-2"
-version = "2.0.0b1"
+version = "2.0.0b2"
 description = "UMA-ST-2 Discord bot and data platform for Umamusume circle events"
 requires-python = ">=3.13,<3.14"
 dependencies = [

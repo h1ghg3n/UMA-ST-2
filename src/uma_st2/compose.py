@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from uuid import uuid4
 
+import discord
+
 from uma_st2.adapters.discord import (
     AccountCommandGroup,
     AccountRegistrationDiscordAdapter,
@@ -35,6 +37,7 @@ from uma_st2.adapters.discord import (
     MatchSettlementRollbackDiscordAdapter,
     MatchSetupDiscordAdapter,
     MatchStaffCommandGroup,
+    MatchStaffInteractionContext,
     MatchStaffWorkflowDiscordAdapter,
     PublicationDeliveryScheduler,
     PublicationDeliveryWorker,
@@ -1111,18 +1114,26 @@ def compose_match_command_group(
 ) -> MatchCommandGroup:
     """Compose current native Match member and staff vertical slices."""
 
+    async def return_to_race_panel(
+        interaction: discord.Interaction,
+        *,
+        context: MatchStaffInteractionContext,
+        source_view: discord.ui.LayoutView,
+    ) -> None:
+        await workflow_adapter.return_to_race_panel(interaction, context=context, source_view=source_view)
+
     entry_adapter = MatchEntryDiscordAdapter(
         queries=compose_match_staff_entry_queries(database_runtime),
         commands=compose_match_entries(database_runtime),
         authorize_autocomplete=authorize_autocomplete,
         authorize_interaction=authorize_interaction,
+        return_to_race_panel=return_to_race_panel,
     )
     setup_adapter = MatchSetupDiscordAdapter(
         creation_queries=compose_match_staff_creation_queries(database_runtime),
         setup_queries=compose_match_staff_setup_queries(database_runtime),
         creation_commands=compose_match_creation(database_runtime),
         setup_commands=compose_match_setup(database_runtime),
-        entry_adapter=entry_adapter,
         authorize_interaction=authorize_interaction,
     )
     betting_open_adapter = MatchBettingOpenDiscordAdapter(
@@ -1198,6 +1209,7 @@ def compose_match_command_group(
     )
     workflow_adapter = MatchStaffWorkflowDiscordAdapter(
         setup_adapter=setup_adapter,
+        entry_adapter=entry_adapter,
         betting_open_adapter=betting_open_adapter,
         betting_close_adapter=betting_close_adapter,
         cancellation_adapter=cancellation_adapter,

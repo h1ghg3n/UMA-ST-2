@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Final, Protocol
 
 from uma_st2.application.execution import QueryRunner, UnitOfWork
-from uma_st2.domain.match import MATCH_ENTRY_MAXIMUM_COUNT, MatchSourceKind, MatchStatus
+from uma_st2.domain.match import MATCH_ENTRY_MAXIMUM_COUNT, MatchGrade, MatchSourceKind, MatchStatus
 
 from .entries import (
     MatchEntryAccountTarget,
@@ -77,8 +78,8 @@ class MatchEntryCandidateRow:
         object.__setattr__(self, "accounts", tuple(self.accounts))
         if any(not isinstance(item, MatchEntryAccountTarget) for item in self.accounts):
             raise ValueError("accounts must contain MatchEntryAccountTarget values.")
-        if not self.accounts or len(self.accounts) > 25:
-            raise ValueError("accounts must contain from 1 through 25 candidates.")
+        if len(self.accounts) > 25:
+            raise ValueError("accounts must contain at most 25 candidates.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +130,8 @@ class MatchEntryTargetChoice:
     match_name: str
     status: MatchStatus
     current_entry_count: int
+    grade: MatchGrade
+    scheduled_at: datetime
 
     def __post_init__(self) -> None:
         _require_positive_int(self.match_id, field_name="match_id")
@@ -255,6 +258,33 @@ class MatchStaffEntryQueries:
 
         return self.query_runner.run(query)
 
+    def prepare_editor(self, *, match_id: int) -> MatchEntryCandidateDraft | MatchEntryRosterSnapshot:
+        """Prefill saved choices by exact IDs; an empty roster starts bulk input."""
+        _require_positive_int(match_id, field_name="match_id")
+
+        def query(unit_of_work: MatchStaffEntryQueryUnitOfWork) -> MatchEntryCandidateDraft | MatchEntryRosterSnapshot:
+            repository = unit_of_work.match_staff_entry_queries
+            current = self._require_eligible(repository.get_target(match_id=match_id))
+            if not current.entries:
+                return current
+            accounts = repository.resolve_game_accounts(ids=tuple(entry.game_account_id for entry in current.entries))
+            if len(accounts) != len(current.entries):
+                raise MatchStaffEntryLookupError("Every saved GameAccount must still resolve exactly once.")
+            return MatchEntryCandidateDraft(
+                current=current,
+                rows=tuple(
+                    MatchEntryCandidateRow(
+                        entry_number=entry.entry_number,
+                        search=MatchEntrySearchLine(account.nickname),
+                        accounts=(account,),
+                    )
+                    for entry, account in zip(current.entries, accounts, strict=True)
+                ),
+                characters=repository.list_characters(),
+            )
+
+        return self.query_runner.run(query)
+
     def prepare_candidates(
         self,
         *,
@@ -280,10 +310,6 @@ class MatchStaffEntryQueries:
                 rows: list[MatchEntryCandidateRow] = []
                 for entry_number, line in enumerate(lines, start=1):
                     accounts = repository.search_game_accounts(chunk=line.account_chunk, limit=limit)
-                    if not accounts:
-                        raise MatchStaffEntryLookupError(
-                            f"Entry {entry_number} GameAccount chunk has no current candidate."
-                        )
                     rows.append(
                         MatchEntryCandidateRow(
                             entry_number=entry_number,
