@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import discord
+import pytest
 from discord import app_commands
 
 from uma_st2.adapters.discord import (
@@ -164,6 +165,18 @@ class RecordingActionAdapter:
         self.result_transition_calls: list[tuple[str, object, object]] = []
         self.settlement_transition_calls: list[tuple[str, object, object]] = []
 
+    async def start_replacement(
+        self,
+        interaction: object,
+        *,
+        match_id: int,
+        reason: str | None,
+        context: object,
+        source_view: object,
+    ) -> None:
+        self.action_calls.append(("entries", match_id, reason))
+        self.race_transition_calls.append(("entries", context, source_view))
+
     async def autocomplete_targets(
         self,
         interaction: object,
@@ -295,6 +308,7 @@ def _workflow(
     actions = RecordingActionAdapter()
     adapter = MatchStaffWorkflowDiscordAdapter(
         setup_adapter=setup,  # type: ignore[arg-type]
+        entry_adapter=actions,  # type: ignore[arg-type]
         betting_open_adapter=actions,  # type: ignore[arg-type]
         betting_close_adapter=actions,  # type: ignore[arg-type]
         cancellation_adapter=actions,  # type: ignore[arg-type]
@@ -413,7 +427,8 @@ def test_each_panel_exposes_the_confirmed_operator_action_catalog() -> None:
     expected = {
         MatchStaffPanelKind.RACE: {
             "새 경기 생성",
-            "기존 경기 수정",
+            "경기 정보 수정",
+            "엔트리 입력/수정",
             "베팅 시작",
             "베팅 마감",
             "경기 전체 취소",
@@ -470,7 +485,8 @@ def test_panel_close_replaces_components_v2_with_buttonless_terminal_layout() ->
     assert not any(isinstance(item, discord.ui.Button) for item in terminal.walk_children())
 
 
-def test_target_selection_is_zero_write_and_delegates_only_after_selection() -> None:
+@pytest.mark.parametrize(("label", "action"), (("베팅 시작", "open"), ("엔트리 입력/수정", "entries")))
+def test_target_selection_is_zero_write_and_delegates_only_after_selection(label: str, action: str) -> None:
     authorization = RecordingAuthorization()
     workflow, _, actions = _workflow(authorization=authorization)
     context = MatchStaffInteractionContext(user_id=123, guild_id=987, channel_id=654)
@@ -478,7 +494,7 @@ def test_target_selection_is_zero_write_and_delegates_only_after_selection() -> 
     stop_calls = _track_stop(source)
     interaction = RecordingInteraction()
 
-    asyncio.run(_button(source, "베팅 시작").callback(interaction))  # type: ignore[arg-type]
+    asyncio.run(_button(source, label).callback(interaction))  # type: ignore[arg-type]
 
     assert interaction.response.defers == [{"thinking": False}]
     assert stop_calls == [True]
@@ -491,8 +507,8 @@ def test_target_selection_is_zero_write_and_delegates_only_after_selection() -> 
     select = _select(target_view)
     select._values = ["71"]
     asyncio.run(select.callback(target_interaction))  # type: ignore[arg-type]
-    assert actions.action_calls == [("open", 71, None)]
-    assert actions.race_transition_calls == [("open", context, target_view)]
+    assert actions.action_calls == [(action, 71, None)]
+    assert actions.race_transition_calls == [(action, context, target_view)]
     assert authorization.calls == [
         (interaction, "match.staff.race"),
         (target_interaction, "match.staff.race"),

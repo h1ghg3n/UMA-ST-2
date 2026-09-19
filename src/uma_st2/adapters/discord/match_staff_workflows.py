@@ -27,6 +27,7 @@ from .match_staff import (
     MatchStaffSettlementHandler,
     MatchStaffSettlementRollbackHandler,
 )
+from .match_staff_entries import MatchEntryDiscordAdapter
 from .match_staff_odds import MatchOddsModeDiscordAdapter
 from .match_staff_setup import MatchSetupDiscordAdapter
 from .strings import match_staff_workflows as copy
@@ -347,6 +348,7 @@ class MatchStaffWorkflowDiscordAdapter:
     """Route panel choices to existing narrow Application-backed adapters."""
 
     setup_adapter: MatchSetupDiscordAdapter
+    entry_adapter: MatchEntryDiscordAdapter
     betting_open_adapter: MatchStaffBettingOpenHandler
     betting_close_adapter: MatchStaffBettingCloseHandler
     cancellation_adapter: MatchStaffCancellationHandler
@@ -498,7 +500,18 @@ class MatchStaffWorkflowDiscordAdapter:
         if not context.matches(interaction):
             await self.send_component_error(interaction, copy.BOUND_INTERACTION_ERROR)
             return
-        if kind == MatchStaffPanelKind.RACE and action == "open":
+        if kind == MatchStaffPanelKind.RACE and action == "entries":
+            if source_view is None:
+                await self.send_component_error(interaction, copy.BOUND_INTERACTION_ERROR)
+                return
+            await self.entry_adapter.start_replacement(
+                interaction,
+                match_id=match_id,
+                reason=None,
+                context=context,
+                source_view=source_view,
+            )
+        elif kind == MatchStaffPanelKind.RACE and action == "open":
             if source_view is None:
                 await self.send_component_error(interaction, copy.BOUND_INTERACTION_ERROR)
                 return
@@ -666,6 +679,7 @@ class MatchStaffWorkflowDiscordAdapter:
         action: str,
     ) -> MatchStaffTargetHandler | None:
         handlers: dict[tuple[MatchStaffPanelKind, str], MatchStaffTargetHandler] = {
+            (MatchStaffPanelKind.RACE, "entries"): self.entry_adapter,
             (MatchStaffPanelKind.RACE, "open"): self.betting_open_adapter,
             (MatchStaffPanelKind.RACE, "close"): self.betting_close_adapter,
             (MatchStaffPanelKind.RACE, "cancel"): self.cancellation_adapter,

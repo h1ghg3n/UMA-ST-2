@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -26,6 +26,7 @@ from uma_st2.adapters.discord import (
     format_match_entry_preview,
     parse_match_entry_lines,
 )
+from uma_st2.adapters.discord.match_staff_entries import MatchEntrySearchCorrectionModal
 from uma_st2.application.match import (
     MatchEntryAccountTarget,
     MatchEntryCandidateDraft,
@@ -42,7 +43,7 @@ from uma_st2.application.match import (
     ReplaceMatchEntries,
 )
 from uma_st2.domain.identity import GameRegion
-from uma_st2.domain.match import MatchSourceKind, MatchStatus
+from uma_st2.domain.match import MatchGrade, MatchSourceKind, MatchStatus
 
 NOW = datetime(2026, 8, 28, 4, 0, tzinfo=UTC)
 
@@ -93,14 +94,27 @@ def _roster(*, count: int = 0) -> MatchEntryRosterSnapshot:
 
 
 class RecordingQueries:
-    def __init__(self, *, desired_count: int = 2) -> None:
+    def __init__(self, *, desired_count: int = 2, unmatched_chunks: set[str] | None = None) -> None:
         self.desired_count = desired_count
+        self.unmatched_chunks = unmatched_chunks or set()
         self.target = _roster(count=1)
         self.lines_seen: list[tuple[MatchEntrySearchLine, ...]] = []
         self.selections_seen: list[tuple[MatchEntrySelection, ...]] = []
 
     def search_targets(self, *, search: str, limit: int) -> tuple[MatchEntryTargetChoice, ...]:
-        return (MatchEntryTargetChoice(71, self.target.match_name, MatchStatus.SCHEDULED, 1),)
+        return (MatchEntryTargetChoice(71, self.target.match_name, MatchStatus.SCHEDULED, 1, MatchGrade.G3, NOW),)
+
+    def prepare_editor(self, *, match_id: int) -> MatchEntryCandidateDraft | MatchEntryRosterSnapshot:
+        if not self.target.entries:
+            return self.target
+        return MatchEntryCandidateDraft(
+            current=self.target,
+            rows=tuple(
+                MatchEntryCandidateRow(index, MatchEntrySearchLine(entry.game_account_name), (_account(index),))
+                for index, entry in enumerate(self.target.entries, start=1)
+            ),
+            characters=tuple(_character(index) for index in range(1, 31)),
+        )
 
     def get_target(self, *, match_id: int) -> MatchEntryRosterSnapshot:
         return self.target
@@ -118,7 +132,7 @@ class RecordingQueries:
                 MatchEntryCandidateRow(
                     entry_number=index,
                     search=line,
-                    accounts=(_account(index + 20),),
+                    accounts=() if line.account_chunk in self.unmatched_chunks else (_account(index + 20),),
                 )
                 for index, line in enumerate(lines, start=1)
             ),
@@ -266,11 +280,36 @@ async def _inline[ResultT](operation: Callable[[], ResultT]) -> ResultT:
     return operation()
 
 
+class RecordingNavigation:
+    def __init__(self) -> None:
+        self.calls: list[discord.ui.LayoutView] = []
+
+    async def __call__(
+        self,
+        interaction: RecordingInteraction,
+        *,
+        context: MatchStaffInteractionContext,
+        source_view: discord.ui.LayoutView,
+    ) -> None:
+        self.calls.append(source_view)
+        await interaction.response.defer(thinking=False)
+        source_view.stop()
+        panel = discord.ui.LayoutView(timeout=600)
+        panel.add_item(
+            discord.ui.Container(
+                discord.ui.TextDisplay("경기 작업 목록"),
+                discord.ui.ActionRow(discord.ui.Button(label="엔트리 입력/수정")),
+            )
+        )
+        await interaction.edit_original_response(content=None, embeds=[], attachments=[], view=panel)
+
+
 def _adapter(
     *,
     queries: RecordingQueries | None = None,
     commands: RecordingCommands | None = None,
     authorization: RecordingAuthorization | None = None,
+    navigation: RecordingNavigation | None = None,
 ) -> tuple[MatchEntryDiscordAdapter, RecordingQueries, RecordingCommands]:
     query_double = queries or RecordingQueries()
     command_double = commands or RecordingCommands()
@@ -281,6 +320,7 @@ def _adapter(
             commands=command_double,  # type: ignore[arg-type]
             authorize_autocomplete=authorization_double,
             authorize_interaction=authorization_double,
+            return_to_race_panel=navigation or RecordingNavigation(),
             blocking_runner=_inline,  # type: ignore[arg-type]
         ),
         query_double,
@@ -308,8 +348,9 @@ def _track_stop(view: discord.ui.LayoutView) -> list[bool]:
     return calls
 
 
-def test_setup_handoff_opens_entry_editor_in_same_message() -> None:
+def test_empty_roster_opens_bulk_input_in_same_message() -> None:
     adapter, queries, commands = _adapter()
+    queries.target = _roster()
     interaction = RecordingInteraction()
     context = MatchStaffInteractionContext.from_interaction(interaction)
     source = discord.ui.LayoutView(timeout=600)
@@ -338,7 +379,7 @@ def test_setup_handoff_query_failure_keeps_source_view_live() -> None:
     def fail_target(*, match_id: int) -> MatchEntryRosterSnapshot:
         raise ValueError(f"missing Match {match_id}")
 
-    queries.get_target = fail_target  # type: ignore[method-assign]
+    queries.prepare_editor = fail_target  # type: ignore[method-assign]
     interaction = RecordingInteraction()
     context = MatchStaffInteractionContext.from_interaction(interaction)
     source = discord.ui.LayoutView(timeout=600)
@@ -453,6 +494,147 @@ def test_modal_submit_supports_eighteen_entries_without_component_overflow() -> 
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("count", (15, 17, 18))
+def test_unmatched_rows_keep_all_entry_buttons_and_disable_review(count: int) -> None:
+    async def scenario() -> None:
+        adapter, queries, commands = _adapter(queries=RecordingQueries(unmatched_chunks={"missing"}))
+        interaction = RecordingInteraction()
+        context = MatchStaffInteractionContext.from_interaction(interaction)
+        source = MatchEntryInputView(adapter=adapter, context=context, target=queries.target, reason=None)
+        chunks = [f"account {index}" for index in range(count)]
+        chunks[5] = chunks[11] = "missing"
+
+        await adapter.show_candidates(
+            interaction,
+            context=context,
+            target=queries.target,
+            raw_entries="\n".join(chunks),
+            reason=None,
+            source_view=source,
+        )  # type: ignore[arg-type]
+
+        roster = interaction.edits[0]["view"]
+        assert isinstance(roster, MatchEntryCandidateView)
+        assert "각 엔트리 버튼을 누르면 수정 혹은 선택 창이 뜹니다." in _layout_text(roster)
+        buttons = [
+            item
+            for item in roster.walk_children()
+            if isinstance(item, discord.ui.Button)
+            and item.custom_id
+            and item.custom_id.startswith("match-entry-candidate-entry-")
+        ]
+        assert len(buttons) == count
+        assert buttons[5].label == "6번 엔트리 : 일치하는 계정 없음"
+        assert buttons[11].label == "12번 엔트리 : 일치하는 계정 없음"
+        assert buttons[5].style is discord.ButtonStyle.danger
+        assert _layout_button(roster, label="선택 내용 검토").disabled
+        assert roster.total_children_count <= 40
+        assert roster.content_length() <= 4000
+        assert roster.to_components()
+        assert source.is_finished()
+        assert commands.calls == []
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("corrected_chunk", ("fixed", "still missing"))
+def test_unmatched_entry_opens_single_line_modal_and_preserves_other_choices(corrected_chunk: str) -> None:
+    async def scenario() -> None:
+        adapter, queries, commands = _adapter(
+            queries=RecordingQueries(unmatched_chunks={"missing", "still missing"}),
+        )
+        context = MatchStaffInteractionContext.from_interaction(RecordingInteraction())
+        lines = tuple(MatchEntrySearchLine(chunk) for chunk in ("first", "missing", "missing"))
+        draft = MatchEntryCandidateSelectionDraft(candidates=queries.prepare_candidates(match_id=71, lines=lines))
+        draft = draft.with_account(121).with_character((221, None))
+        roster = MatchEntryCandidateView(adapter=adapter, context=context, draft=draft, reason="operator note")
+        store = ViewStore(SimpleNamespace())  # type: ignore[arg-type]
+        store.add_view(roster, 777)
+        opening = RecordingInteraction(view_store=store, message_id=777)
+        await _layout_button(roster, label="2번 엔트리 : 일치하는 계정 없음").callback(opening)  # type: ignore[arg-type]
+
+        assert not roster.is_finished()
+        modal = opening.response.modals[0]
+        assert isinstance(modal, MatchEntrySearchCorrectionModal)
+        assert len(modal.children) == 1
+        assert modal.account_chunk.default == "missing"
+        assert "2번" in modal.title
+        submit = RecordingInteraction(interaction_id=606, view_store=store, message_id=777)
+        modal._refresh(
+            submit,
+            [
+                {
+                    "type": 1,
+                    "components": [{"type": 4, "custom_id": modal.account_chunk.custom_id, "value": corrected_chunk}],
+                }
+            ],
+            {},
+        )  # noqa: SLF001
+        await modal.on_submit(submit)  # type: ignore[arg-type]
+
+        replacement = submit.edits[0]["view"]
+        assert isinstance(replacement, MatchEntryCandidateView)
+        assert [line.account_chunk for line in queries.lines_seen[-1]] == ["first", corrected_chunk, "missing"]
+        assert _layout_button(replacement, label="1. 계정 @21 · 말 **21**").style is discord.ButtonStyle.success
+        assert _layout_button(replacement, label="3번 엔트리 : 일치하는 계정 없음")
+        assert _layout_button(replacement, label="선택 내용 검토").disabled
+        if corrected_chunk == "still missing":
+            retry = RecordingInteraction(interaction_id=607)
+            await _layout_button(replacement, label="2번 엔트리 : 일치하는 계정 없음").callback(retry)  # type: ignore[arg-type]
+            assert retry.response.modals[0].account_chunk.default == "still missing"
+        else:
+            assert _layout_button(replacement, label="2. 계정 미선택 · 우마무스메 미선택")
+        assert submit.response.defers == [{"thinking": False}]
+        assert roster.is_finished()
+        assert all(item.view is replacement for item in store._views[777].values())  # noqa: SLF001
+        assert commands.calls == []
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("failure", ("closed", "query", "delivery", "context"))
+def test_search_correction_failure_is_zero_write(failure: str) -> None:
+    async def scenario() -> None:
+        adapter, queries, commands = _adapter(queries=RecordingQueries(unmatched_chunks={"missing"}))
+        context = MatchStaffInteractionContext.from_interaction(RecordingInteraction())
+        draft = MatchEntryCandidateSelectionDraft(
+            candidates=queries.prepare_candidates(match_id=71, lines=(MatchEntrySearchLine("missing"),)),
+        )
+        source = MatchEntryCandidateView(adapter=adapter, context=context, draft=draft, reason=None)
+        if failure == "closed":
+            source.stop()
+        if failure == "query":
+
+            def broken_query(**kwargs: object) -> MatchEntryCandidateDraft:
+                raise RuntimeError("lookup failed")
+
+            queries.prepare_candidates = broken_query  # type: ignore[method-assign]
+        interaction = RecordingInteraction(
+            user_id=999 if failure == "context" else 123,
+            edit_errors=[RuntimeError("edit failed")] if failure == "delivery" else None,
+        )
+        await adapter.correct_candidate_search(
+            interaction,
+            context=context,
+            draft=draft,
+            raw_chunk="fixed",
+            reason=None,
+            source_view=source,
+        )  # type: ignore[arg-type]
+
+        assert commands.calls == []
+        assert interaction.edits == []
+        if failure in {"query", "context"}:
+            assert not source.is_finished()
+        else:
+            assert source.is_finished()
+        if failure in {"closed", "context"}:
+            assert len(queries.lines_seen) == 1
+        assert interaction.followup.messages or interaction.response.messages
+
+    asyncio.run(scenario())
+
+
 def test_modal_submit_unexpected_query_failure_keeps_input_live_and_reports_reference() -> None:
     async def scenario() -> None:
         authorization = RecordingAuthorization(require_acknowledged=True)
@@ -523,7 +705,7 @@ def test_candidate_selection_replacement_keeps_cancel_and_selects_registered() -
         dispatch_items = tuple(view_store._views[message_id].values())  # noqa: SLF001
         assert dispatch_items
         assert all(item.view is replacement for item in dispatch_items)
-        assert any(item.custom_id == "match-entry-replacement-cancel" for item in dispatch_items)
+        assert any(item.custom_id == "match-entry-candidate-detail-cancel" for item in dispatch_items)
 
     asyncio.run(scenario())
 
@@ -605,14 +787,16 @@ def test_entry_button_opens_detail_and_pages_all_canonical_umamusume() -> None:
         assert [item.label for item in detail_buttons] == [
             "이전 캐릭터",
             "다음 캐릭터",
+            "계정 검색어 수정",
             "선택",
             "취소",
         ]
         assert [item.custom_id for item in detail_buttons] == [
             "match-entry-character-page-이전",
             "match-entry-character-page-다음",
+            "match-entry-search-correction",
             "match-entry-candidate-back",
-            "match-entry-replacement-cancel",
+            "match-entry-candidate-detail-cancel",
         ]
         character_select = next(
             item
@@ -648,7 +832,7 @@ def test_entry_button_opens_detail_and_pages_all_canonical_umamusume() -> None:
         )
         assert len(second_page_select.options) == 5
         assert any(
-            isinstance(item, discord.ui.Button) and item.custom_id == "match-entry-replacement-cancel"
+            isinstance(item, discord.ui.Button) and item.custom_id == "match-entry-candidate-detail-cancel"
             for item in second_page.walk_children()
         )
 
@@ -773,6 +957,144 @@ def test_multi_page_preview_requires_every_page_before_confirm() -> None:
     assert second.preview.all_pages_reviewed is True
     assert _layout_button(second, label="Entry 교체 확정").disabled is False
     assert commands.calls == []
+
+
+@pytest.mark.parametrize("count", (17, 18))
+def test_existing_roster_opens_selected_entry_buttons_without_retyping(count: int) -> None:
+    async def scenario() -> None:
+        adapter, queries, commands = _adapter()
+        queries.target = _roster(count=count)
+        interaction = RecordingInteraction()
+        context = MatchStaffInteractionContext.from_interaction(interaction)
+        source = discord.ui.LayoutView(timeout=600)
+        await adapter.start_replacement(interaction, context=context, match_id=71, reason=None, source_view=source)  # type: ignore[arg-type]
+        roster = interaction.edits[0]["view"]
+        assert isinstance(roster, MatchEntryCandidateView)
+        assert source.is_finished()
+        entry_buttons = [
+            item
+            for item in roster.walk_children()
+            if isinstance(item, discord.ui.Button) and item.custom_id.startswith("match-entry-candidate-entry-")
+        ]
+        assert len(entry_buttons) == count
+        assert all(item.style == discord.ButtonStyle.success for item in entry_buttons)
+        assert not _layout_button(roster, label="선택 내용 검토").disabled
+        assert queries.lines_seen == [] and commands.calls == []
+        clicked = RecordingInteraction(interaction_id=901)
+        await entry_buttons[0].callback(clicked)  # type: ignore[arg-type]
+        detail = clicked.edits[0]["view"]
+        selects = [item for item in detail.walk_children() if isinstance(item, discord.ui.Select)]
+        assert [option.value for option in selects[0].options if option.default] == ["101"]
+        assert [option.value for option in selects[1].options if option.default] == ["201:0"]
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("selected_before", (False, True))
+@pytest.mark.parametrize("action", ("선택", "취소"))
+def test_detail_exit_keeps_or_discards_only_current_entry_changes(selected_before: bool, action: str) -> None:
+    async def scenario() -> None:
+        adapter, queries, commands = _adapter()
+        context = MatchStaffInteractionContext.from_interaction(RecordingInteraction())
+        candidates = queries.prepare_candidates(match_id=71, lines=parse_match_entry_lines("first\nsecond"))
+        first = replace(candidates.rows[0], accounts=(_account(21), _account(23)))
+        candidates = replace(candidates, rows=(first, candidates.rows[1]))
+        draft = MatchEntryCandidateSelectionDraft(
+            candidates=candidates,
+            account_ids=(121 if selected_before else None, 122),
+            character_identities=((221, None) if selected_before else None, (222, None)),
+        ).viewed(0)
+        detail = MatchEntryCandidateDetailView(adapter=adapter, context=context, draft=draft, reason=None)
+        store = ViewStore(SimpleNamespace())  # type: ignore[arg-type]
+        store.add_view(detail, 911)
+        account_select = next(
+            item
+            for item in detail.walk_children()
+            if isinstance(item, discord.ui.Select) and item.custom_id == "match-entry-candidate-account"
+        )
+        account_select._values = ["123"]  # noqa: SLF001
+        account_click = RecordingInteraction(view_store=store, message_id=911)
+        await account_select.callback(account_click)  # type: ignore[arg-type]
+        updated = account_click.edits[0]["view"]
+        character_select = next(
+            item
+            for item in updated.walk_children()
+            if isinstance(item, discord.ui.Select) and item.custom_id == "match-entry-candidate-character"
+        )
+        character_select._values = ["225:0"]  # noqa: SLF001
+        character_click = RecordingInteraction(interaction_id=913, view_store=store, message_id=911)
+        await character_select.callback(character_click)  # type: ignore[arg-type]
+        updated = character_click.edits[0]["view"]
+        exit_click = RecordingInteraction(interaction_id=914, view_store=store, message_id=911)
+        await _layout_button(updated, label=action).callback(exit_click)  # type: ignore[arg-type]
+        roster = exit_click.edits[0]["view"]
+        assert isinstance(roster, MatchEntryCandidateView)
+        assert all(item.view is roster for item in store._views[911].values())  # noqa: SLF001
+        assert _layout_button(roster, label="2. 계정 @22 · 말 **22**").style == discord.ButtonStyle.success
+        if action == "선택":
+            assert _layout_button(roster, label="1. 계정 @23 · 말 **25**").style == discord.ButtonStyle.success
+        elif selected_before:
+            assert _layout_button(roster, label="1. 계정 @21 · 말 **21**").style == discord.ButtonStyle.success
+            assert not _layout_button(roster, label="선택 내용 검토").disabled
+        else:
+            assert _layout_button(roster, label="선택 내용 검토").disabled
+        assert updated.is_finished() and not roster.is_finished()
+        assert queries.selections_seen == [] and commands.calls == []
+
+    asyncio.run(scenario())
+
+
+def test_roster_back_returns_to_a_new_race_panel_without_writes() -> None:
+    async def scenario() -> None:
+        navigation = RecordingNavigation()
+        adapter, queries, commands = _adapter(navigation=navigation)
+        context = MatchStaffInteractionContext.from_interaction(RecordingInteraction())
+        draft = MatchEntryCandidateSelectionDraft(
+            candidates=queries.prepare_candidates(match_id=71, lines=parse_match_entry_lines("first"))
+        )
+        roster = MatchEntryCandidateView(adapter=adapter, context=context, draft=draft, reason=None)
+        store = ViewStore(SimpleNamespace())  # type: ignore[arg-type]
+        store.add_view(roster, 921)
+        click = RecordingInteraction(view_store=store, message_id=921)
+        await _layout_button(roster, label="뒤로").callback(click)  # type: ignore[arg-type]
+        panel = click.edits[0]["view"]
+        assert navigation.calls == [roster]
+        assert roster.is_finished() and not panel.is_finished()
+        assert all(item.view is panel for item in store._views[921].values())  # noqa: SLF001
+        assert "경기 작업 목록" in _layout_text(panel)
+        assert queries.selections_seen == [] and commands.calls == []
+
+    asyncio.run(scenario())
+
+
+def test_saved_account_can_reopen_single_search_without_retyping_other_entries() -> None:
+    async def scenario() -> None:
+        adapter, queries, commands = _adapter()
+        context = MatchStaffInteractionContext.from_interaction(RecordingInteraction())
+        draft = MatchEntryCandidateSelectionDraft(
+            candidates=queries.prepare_candidates(match_id=71, lines=parse_match_entry_lines("first\nsecond")),
+            account_ids=(121, 122),
+            character_identities=((221, None), (222, None)),
+        ).viewed(0)
+        detail = MatchEntryCandidateDetailView(adapter=adapter, context=context, draft=draft, reason=None)
+        opening = RecordingInteraction()
+        await _layout_button(detail, label="계정 검색어 수정").callback(opening)  # type: ignore[arg-type]
+        modal = opening.response.modals[0]
+        assert isinstance(modal, MatchEntrySearchCorrectionModal)
+        assert modal.account_chunk.default == "first"
+        assert not detail.is_finished()
+        modal.account_chunk._value = "replacement"  # noqa: SLF001
+        submitted = RecordingInteraction(interaction_id=931)
+        await modal.on_submit(submitted)  # type: ignore[arg-type]
+        roster = submitted.edits[0]["view"]
+        assert isinstance(roster, MatchEntryCandidateView)
+        assert queries.lines_seen[-1] == parse_match_entry_lines("replacement\nsecond")
+        assert _layout_button(roster, label="2. 계정 @22 · 말 **22**").style == discord.ButtonStyle.success
+        assert _layout_button(roster, label="1. 계정 미선택 · 말 **21**")
+        assert _layout_button(roster, label="선택 내용 검토").disabled
+        assert detail.is_finished() and commands.calls == []
+
+    asyncio.run(scenario())
 
 
 def test_context_mismatch_is_zero_write() -> None:

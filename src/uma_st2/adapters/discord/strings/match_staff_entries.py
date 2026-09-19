@@ -18,6 +18,7 @@ from uma_st2.application.match import (
 from uma_st2.domain.match import MATCH_ENTRY_MAXIMUM_COUNT
 
 from ..common import bounded_discord_message, safe_discord_text
+from ..datetime_codec import format_discord_datetime
 
 INPUT_TYPE_ERROR = "Entry 입력은 문자열이어야 합니다."
 INPUT_EMPTY_ERROR = "Entry를 한 줄 이상 입력해 주세요."
@@ -26,6 +27,10 @@ INPUT_BUTTON_LABEL = "Entry 입력"
 MODAL_TITLE = "룸매치 Entry 전체 입력"
 MODAL_LABEL = "게임계정 일부 혹은 전체"
 MODAL_PLACEHOLDER = "계정 닉네임 일부\n다른 계정 닉네임 전체"
+SEARCH_CORRECTION_TITLE = "Entry 검색어 수정"
+SEARCH_CORRECTION_LABEL = "게임계정 검색어"
+ACCOUNT_SEARCH_LABEL = "계정 검색어 수정"
+NO_MATCHING_ACCOUNT = "일치하는 계정 없음"
 REENTRY_LABEL = "전체 다시 입력"
 REOPEN_ENTRY = "Entry 화면을 갱신하지 못했습니다. `/match staff race`를 다시 열어 주세요."
 CANDIDATE_CONFIRM_LABEL = "선택 내용 검토"
@@ -36,6 +41,7 @@ CANDIDATE_CHARACTER_NEXT_LABEL = "다음 캐릭터"
 CANDIDATE_SELECT_LABEL = "선택"
 CONFIRM_LABEL = "Entry 교체 확정"
 CANCEL_LABEL = "취소"
+BACK_LABEL = "뒤로"
 PREVIOUS_LABEL = "이전"
 NEXT_LABEL = "다음"
 BOUND_SUBMIT_ERROR = "이 입력 창을 연 사용자와 서버·채널에서만 제출할 수 있습니다."
@@ -63,7 +69,8 @@ def match_entry_autocomplete_choices(
     for target in targets:
         suffix = f" · ID {target.match_id}" if target.match_name in duplicate_names else ""
         label = safe_discord_text(
-            f"{target.match_name} · Entry {target.current_entry_count}명{suffix}",
+            f"{target.match_name} · {target.grade.value} · "
+            f"{format_discord_datetime(target.scheduled_at)} · Entry {target.current_entry_count}명{suffix}",
             limit=100,
         )
         choices.append(app_commands.Choice(name=label, value=target.match_id))
@@ -74,7 +81,7 @@ def format_match_entry_input(target: MatchEntryRosterSnapshot, *, notice: str | 
     """Render the zero-write bulk-input launcher."""
 
     lines = [
-        "## 룸매치 Entry 전체 교체",
+        "## 룸매치 엔트리 입력/수정",
         f"Match: {safe_discord_text(target.match_name, limit=200)}",
         f"현재 Entry: {len(target.entries)}명",
         "`게임계정 일부 혹은 전체`에 GameAccount nickname 일부 또는 전체를 한 줄씩 입력합니다. "
@@ -101,7 +108,7 @@ def format_match_entry_candidate_roster(
     lines = [
         "## 룸매치 Entry 설정",
         f"Match: {safe_discord_text(draft.current.match_name, limit=200)}",
-        "Entry 버튼을 눌러 GameAccount와 우마무스메를 설정합니다.",
+        "각 엔트리 버튼을 누르면 수정 혹은 선택 창이 뜹니다.",
     ]
     for row, account_id, character_identity in zip(
         draft.rows,
@@ -109,6 +116,12 @@ def format_match_entry_candidate_roster(
         selected_character_identities,
         strict=True,
     ):
+        if not row.accounts:
+            lines.append(
+                f"{row.entry_number}번 엔트리 : {NO_MATCHING_ACCOUNT} "
+                f"· 검색어 {safe_discord_text(row.search.account_chunk, limit=80)}"
+            )
+            continue
         account = next((item for item in row.accounts if item.id == account_id), None)
         character = next((item for item in draft.characters if item.identity == character_identity), None)
         account_name = "계정 미선택" if account is None else account.nickname

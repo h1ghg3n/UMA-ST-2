@@ -12,8 +12,9 @@ from uma_st2.application.match.entries import (
 )
 from uma_st2.application.match.staff_entry_queries import MatchEntryTargetChoice
 from uma_st2.domain.identity import GameRegion
-from uma_st2.domain.match import MatchSourceKind, MatchStatus
+from uma_st2.domain.match import MatchGrade, MatchSourceKind, MatchStatus
 
+from .datetime_codec import from_database_utc
 from .match_entries import SqlAlchemyMatchEntryRepository
 from .orm import GameAccountORM, MatchEntryORM, MatchORM, UmamusumeORM, UmamusumeVariantORM
 from .uow import (
@@ -51,6 +52,8 @@ class SqlAlchemyMatchStaffEntryQueryRepository:
                 match_name=match.name,
                 status=MatchStatus(match.status),
                 current_entry_count=stored_entry_count,
+                grade=MatchGrade(match.grade),
+                scheduled_at=from_database_utc(match.scheduled_at, field_name="matches.scheduled_at"),
             )
             for match, stored_entry_count in rows
         )
