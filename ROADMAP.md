@@ -4,7 +4,7 @@
 
 Public `main`은 V2 runtime을 기준으로 유지합니다. 마지막 V1 public snapshot은 `v1` branch에 보존합니다.
 
-현재 공개 릴리스는 `v2.0.0 Beta 1`이며 package version은 `2.0.0b1`입니다. Beta 단계에서는 command와
+현재 공개 릴리스는 `v2.0.0 Beta 2`이며 package version은 `2.0.0b2`입니다. Beta 단계에서는 command와
 schema가 변경될 수 있습니다. 정식 `2.0.0` 릴리스는 후속 검증을 거쳐 별도로 확정합니다.
 
 ## 구현된 범위
